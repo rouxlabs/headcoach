@@ -334,6 +334,13 @@ func TestHookNamesTheWindowOnce(t *testing.T) {
 	f.hook("UserPromptSubmit", sid, obj{"prompt": "look at PROJ-42 please"}, "X-Tmux-Pane", "%9")
 	f.hook("UserPromptSubmit", sid, obj{"prompt": "look at PROJ-42 please"}, "X-Tmux-Pane", "%9")
 	eq(t, f.tmux.renamed, []string{"%9|0a1b2c3d-PROJ-42"})
+
+	// A /clear you type opens a new task, and its first prompt names the window again.
+	const next = "1b2c3d4e-0000-4000-8000-000000000002"
+	f.hook("SessionStart", next, obj{"source": "clear"}, "X-Tmux-Pane", "%9")
+	f.hook("UserPromptSubmit", next, obj{"prompt": "write the docs"}, "X-Tmux-Pane", "%9")
+	f.hook("UserPromptSubmit", next, obj{"prompt": "and the tests"}, "X-Tmux-Pane", "%9")
+	eq(t, f.tmux.renamed, []string{"%9|0a1b2c3d-PROJ-42", "%9|1b2c3d4e-cleared-session", "%9|1b2c3d4e-write-the-docs"})
 }
 
 func TestReply(t *testing.T) {

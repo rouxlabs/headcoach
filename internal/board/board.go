@@ -3,6 +3,8 @@
 // Rules, in one place:
 //
 //	UserPromptSubmit      -> running   (creates the task on the first prompt of an unknown session)
+//	SessionStart          -> a /clear you type closes the task as done and opens a new one in backlog,
+//	                         compaction and hc reset keep the task
 //	PreToolUse            -> running   (AskUserQuestion and ExitPlanMode -> needs)
 //	PostToolUse           -> running   when the task was waiting on a permission or dialog
 //	Notification          -> needs     for permission prompts and input dialogs
@@ -39,6 +41,13 @@ import (
 
 // Opening is the last activity of a task whose session the board has just started.
 const Opening = "Opening the session"
+
+// Cleared is the title of the task a session goes on with after a /clear you typed, until its first prompt.
+const Cleared = "Cleared session"
+
+// resetWindow is how long, in seconds, the session hc reset clears has to start again. The daemon
+// waits 15 seconds before it briefs it anyway: this leaves room for a slow start.
+const resetWindow = 60
 
 // backgroundPrefix marks the child rows that are background jobs. Sub-agents have their own events.
 const backgroundPrefix = "bg:"
@@ -147,22 +156,45 @@ func (b *Board) touchSession(p Payload, o Origin) (*store.Session, error) {
 	if sess, err = b.st.Session(sid); err != nil {
 		return nil, err
 	}
-	if sess.TaskID == "" && o.TaskHint != "" {
-		hinted, err := b.st.Task(o.TaskHint)
-		if err != nil {
+	// A cleared or compacted session keeps the hint of the one it replaces: onSessionStart decides.
+	if sess.TaskID == "" && !replaces(p) {
+		hinted, err := b.hinted(sess, o.TaskHint)
+		if err != nil || hinted == nil {
+			return sess, err
+		}
+		if err := b.Link(sid, hinted.ID); err != nil {
 			return nil, err
 		}
-		// A claude run nested in the task's session inherits the hint, but one
-		// of another profile is not the task's: its id cannot be resumed there.
-		if hinted != nil && (!b.cfg.HasProfile(hinted.Profile) || b.cfg.ProfileFor(sess.ConfigDir) == hinted.Profile) {
-			if err := b.Link(sid, hinted.ID); err != nil {
-				return nil, err
-			}
-			return b.st.Session(sid)
-		}
+		return b.st.Session(sid)
 	}
 	return sess, nil
 }
+
+// hinted is the task the hint names, when the session may belong to it.
+func (b *Board) hinted(sess *store.Session, hint string) (*store.Task, error) {
+	if hint == "" {
+		return nil, nil
+	}
+	task, err := b.st.Task(hint)
+	if err != nil || task == nil {
+		return nil, err
+	}
+	// A claude run nested in the task's session inherits the hint, but one
+	// of another profile is not the task's: its id cannot be resumed there.
+	if b.cfg.HasProfile(task.Profile) && b.cfg.ProfileFor(sess.ConfigDir) != task.Profile {
+		return nil, nil
+	}
+	return task, nil
+}
+
+// replaces tells whether a payload starts a session in place of another, in the same process: a /clear or a compaction.
+func replaces(p Payload) bool {
+	source := p.str("source")
+	return p.str("hook_event_name") == "SessionStart" && (source == "clear" || source == "compact")
+}
+
+// fresh tells whether a task is the one a /clear opened, still waiting for its first prompt.
+func fresh(t *store.Task) bool { return t.Source == "session" && t.Prompt == "" }
 
 // personaOf is the persona a skill stands for: its name without the plugin prefix, when it matches the pattern.
 func (b *Board) personaOf(skill string) string {
@@ -205,7 +237,7 @@ func (b *Board) Apply(p Payload, o Origin) (string, error) {
 	}
 	switch name {
 	case "SessionStart":
-		err = b.onSessionStart(p, sess)
+		err = b.onSessionStart(p, sess, o)
 	case "UserPromptSubmit":
 		err = b.onUserPromptSubmit(p, sess)
 	case "PreToolUse":
@@ -343,7 +375,7 @@ func (b *Board) syncBackground(p Payload, sess *store.Session) error {
 
 // --- handlers ------------------------------------------------------------------------
 
-func (b *Board) onSessionStart(p Payload, sess *store.Session) error {
+func (b *Board) onSessionStart(p Payload, sess *store.Session, o Origin) error {
 	source := p.str("source")
 	if source == "fork" && sess.TaskID != "" {
 		// The fork is where the sub-agents and jobs now run, and the only session that will report them.
@@ -351,24 +383,27 @@ func (b *Board) onSessionStart(p Payload, sess *store.Session) error {
 			"UPDATE agents SET session_id = ? WHERE task_id = ? AND state = 'running'", sess.SessionID, sess.TaskID)
 		return err
 	}
-	if sess.TaskID != "" || (source != "clear" && source != "compact") || sess.Pane == "" {
+	if sess.TaskID != "" || !replaces(p) {
 		return nil
 	}
-	// /clear and compaction start a new session id in the same pane: keep it on the same task.
-	var prev sql.NullString
-	err := b.st.QueryRow(
-		"SELECT task_id FROM sessions WHERE pane = ? AND session_id != ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
-		sess.Pane, sess.SessionID,
-	).Scan(&prev)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && prev.String == "") {
-		return nil
+	// /clear and compaction start a new session id in the same pane and process. The pane says which task
+	// it was on: the hint stays the one the board started the process for, even after a /clear.
+	task, err := b.paneTask(sess)
+	if err == nil && task == nil {
+		task, err = b.hinted(sess, o.TaskHint)
 	}
-	if err != nil {
-		return err
-	}
-	task, err := b.st.Task(prev.String)
 	if err != nil || task == nil {
 		return err
+	}
+	if source == "clear" {
+		reset, err := b.resetting(task)
+		if err != nil {
+			return err
+		}
+		if reset {
+			return b.Link(sess.SessionID, task.ID)
+		}
+		return b.cleared(p, sess, task)
 	}
 	if task.State == "done" {
 		// A task you, or another agent, closed by hand stays closed: what follows is a new task. One the
@@ -383,6 +418,92 @@ func (b *Board) onSessionStart(p Payload, sess *store.Session) error {
 		}
 	}
 	return b.Link(sess.SessionID, task.ID)
+}
+
+// paneTask is the task of the latest other session in the same tmux or Herdr pane, or nil.
+func (b *Board) paneTask(sess *store.Session) (*store.Task, error) {
+	var where string
+	var args []any
+	switch {
+	case sess.Pane != "":
+		where, args = "pane = ?", []any{sess.Pane}
+	case sess.HerdrPane != "":
+		where, args = "herdr_socket = ? AND herdr_pane = ?", []any{sess.HerdrSocket, sess.HerdrPane}
+	default:
+		return nil, nil
+	}
+	var prev sql.NullString
+	err := b.st.QueryRow(
+		"SELECT task_id FROM sessions WHERE "+where+" AND session_id != ? ORDER BY started_at DESC, rowid DESC LIMIT 1",
+		append(args, sess.SessionID)...,
+	).Scan(&prev)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && prev.String == "") {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return b.st.Task(prev.String)
+}
+
+// resetting tells whether hc reset typed the /clear that cleared a task's session. A reset counts once:
+// it must be newer than every session of the task, so a /clear you type after it is yours.
+func (b *Board) resetting(task *store.Task) (bool, error) {
+	var n int
+	err := b.st.QueryRow(
+		"SELECT count(*) FROM messages WHERE task_id = ?1 AND kind = 'reset' AND at >= ?2"+
+			" AND at > (SELECT coalesce(max(started_at), 0) FROM sessions WHERE task_id = ?1)",
+		task.ID, store.Now()-resetWindow,
+	).Scan(&n)
+	return n > 0, err
+}
+
+// cleared closes the task of a session you cleared and opens a new one for what comes next in it.
+func (b *Board) cleared(p Payload, sess *store.Session, task *store.Task) error {
+	if fresh(task) {
+		return b.Link(sess.SessionID, task.ID) // cleared again before its first prompt: nothing to close
+	}
+	if _, err := b.st.SetState(task.ID, "done", FromYou, nil); err != nil {
+		return err
+	}
+	if sess.Pane != "" || sess.HerdrPane != "" {
+		// Ended before its SessionEnd arrives, if it ever does: a reply to the old task must not reach the pane.
+		_, err := b.st.Exec("UPDATE sessions SET live = 0, ended_at = ? WHERE task_id = ? AND live = 1"+
+			" AND pane = ? AND herdr_socket = ? AND herdr_pane = ?",
+			store.Now(), task.ID, sess.Pane, sess.HerdrSocket, sess.HerdrPane)
+		if err != nil {
+			return err
+		}
+	}
+	taskID, err := b.newTaskID(sess.SessionID)
+	if err != nil {
+		return err
+	}
+	cwd := p.str("cwd")
+	if cwd == "" {
+		cwd = sess.Cwd
+	}
+	repo, branch := GitInfo(cwd)
+	_, err = b.st.CreateTask(store.Task{
+		ID: taskID, Title: Cleared, Cwd: cwd, Repo: repo, Branch: branch, Source: "session", Remote: GitRemote(cwd),
+		Profile: b.cfg.ProfileFor(sess.ConfigDir), Last: "Context cleared",
+	}, "hook")
+	if err != nil {
+		return err
+	}
+	return b.Link(sess.SessionID, taskID)
+}
+
+// newTaskID is the id of a task a session starts: the session's id, unless a deleted task once had it.
+func (b *Board) newTaskID(sid string) (string, error) {
+	taken, err := b.st.Task(sid)
+	if err != nil {
+		return "", err
+	}
+	if taken != nil {
+		return NewID(), nil
+	}
+	return sid, nil
 }
 
 func (b *Board) onUserPromptSubmit(p Payload, sess *store.Session) error {
@@ -405,16 +526,16 @@ func (b *Board) onUserPromptSubmit(p Payload, sess *store.Session) error {
 			// A task added to the backlog starts from where the checkout is when it runs.
 			fields["base"] = GitHead(task.Cwd)
 		}
+		if fresh(task) {
+			fields["title"], fields["prompt"] = TitleFromPrompt(prompt), prompt
+		}
 		_, err = b.st.SetState(task.ID, "running", "hook", fields)
 		return err
 	}
-	// The task takes the id of its first session, unless a deleted task once had it.
 	sid := sess.SessionID
-	taskID := sid
-	if taken, err := b.st.Task(sid); err != nil {
+	taskID, err := b.newTaskID(sid)
+	if err != nil {
 		return err
-	} else if taken != nil {
-		taskID = NewID()
 	}
 	cwd := p.str("cwd")
 	if cwd == "" {

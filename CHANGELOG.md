@@ -4,6 +4,10 @@ All notable changes to headcoach. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+### Changed
+
+- a `/clear` you type closes the task as `Done` and starts a new one in `Backlog`, named by its first prompt: the board used to keep the old card, its title and its state, for an empty session; `hc reset` and a compaction still keep the task, and a session in a Herdr pane now keeps it across a compaction too
+
 ### Fixed
 
 - sessions in the board's tmux no longer inherit the environment of the terminal that first started it, such as the `HERDR_*`, `DIRENV_*` and `CLAUDE_*` variables of a Claude Code session in a Herdr pane, and a server already started that way is cleaned before the next session opens

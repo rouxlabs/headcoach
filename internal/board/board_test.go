@@ -670,13 +670,12 @@ func TestOnlyANewPromptRevivesAnEndedSession(t *testing.T) {
 
 // --- session start, /clear -----------------------------------------------------------
 
-func TestSessionStartClearInTheSamePaneLinksToThePreviousTask(t *testing.T) {
-	for _, source := range []string{"clear", "compact"} {
+func TestSessionStartCompactInTheSamePaneLinksToThePreviousTask(t *testing.T) {
+	for _, pane := range []Origin{{Pane: "%1"}, {HerdrPane: "w1-p1", HerdrSocket: "/run/herdr.sock"}} {
 		f := newFixture(t)
-		pane := Origin{Pane: "%1"}
 		f.from("s1", pane, "UserPromptSubmit", P{"prompt": "first"})
-		f.from("s1", pane, "SessionEnd", P{"reason": "clear"})
-		eq(t, f.from("s2", pane, "SessionStart", P{"source": source}), "s1")
+		f.from("s1", pane, "SessionEnd", P{"reason": "other"})
+		eq(t, f.from("s2", pane, "SessionStart", P{"source": "compact"}), "s1")
 		short, _ := os.ReadFile(filepath.Join(f.cfg.SessionsDir(), "s2"))
 		eq(t, string(short), "s1")
 		eq(t, f.from("s2", pane, "UserPromptSubmit", P{"prompt": "second"}), "s1")
@@ -685,14 +684,126 @@ func TestSessionStartClearInTheSamePaneLinksToThePreviousTask(t *testing.T) {
 	}
 }
 
+func TestSessionStartClearByHandStartsANewTask(t *testing.T) {
+	for _, pane := range []Origin{{Pane: "%1"}, {HerdrPane: "w1-p1", HerdrSocket: "/run/herdr.sock"}} {
+		f := newFixture(t)
+		f.from("s1", pane, "UserPromptSubmit", P{"prompt": "first"})
+		f.from("s1", pane, "Stop", P{"last_assistant_message": "Ship it?"})
+		eq(t, f.task("s1").State, "needs")
+		f.from("s1", pane, "SessionEnd", P{"reason": "clear"})
+		eq(t, f.from("s2", pane, "SessionStart", P{"source": "clear", "cwd": "/nowhere"}), "s2")
+
+		// The old task is closed, by you, and keeps its session, its title and its history.
+		old := f.task("s1")
+		eq(t, []string{old.State, old.Title, old.Last}, []string{"done", "first", "You: first"})
+		eq(t, f.history("s1"), []string{"running hook", "needs hook", "done you"})
+		eq(t, f.session("s1").TaskID, "s1")
+
+		// The new one waits in the backlog, live on the cleared session, until its first prompt names it.
+		next := f.task("s2")
+		eq(t, []string{next.State, next.Title, next.Prompt, next.Last, next.Source, next.Cwd},
+			[]string{"backlog", Cleared, "", "Context cleared", "session", "/nowhere"})
+		eq(t, f.session("s2").TaskID, "s2")
+		short, _ := os.ReadFile(filepath.Join(f.cfg.SessionsDir(), "s2"))
+		eq(t, string(short), "s2")
+
+		eq(t, f.from("s2", pane, "UserPromptSubmit", P{"prompt": "\nSecond thing\nwith more detail"}), "s2")
+		next = f.task("s2")
+		eq(t, []string{next.State, next.Title, next.Prompt, next.Last},
+			[]string{"running", "Second thing", "\nSecond thing\nwith more detail", "You: Second thing"})
+		eq(t, f.history("s2"), []string{"backlog hook", "running hook"})
+		// Its first prompt is its own: the next one does not rename it.
+		f.from("s2", pane, "UserPromptSubmit", P{"prompt": "and a third"})
+		eq(t, f.task("s2").Title, "Second thing")
+		eq(t, f.count("tasks"), 2)
+	}
+}
+
+func TestSessionStartClearAgainBeforeTheFirstPromptKeepsTheNewTask(t *testing.T) {
+	f := newFixture(t)
+	pane := Origin{Pane: "%1"}
+	f.from("s1", pane, "UserPromptSubmit", P{"prompt": "first"})
+	eq(t, f.from("s2", pane, "SessionStart", P{"source": "clear"}), "s2")
+	eq(t, f.from("s3", pane, "SessionStart", P{"source": "clear"}), "s2")
+	eq(t, f.count("tasks"), 2)
+	eq(t, f.task("s2").State, "backlog")
+}
+
+func TestATitleOnlyTaskKeepsItsTitleOnTheFirstPrompt(t *testing.T) {
+	f := newFixture(t)
+	const id = "task-0001-aaaa"
+	if _, err := f.st.CreateTask(store.Task{ID: id, Title: "Planned work"}, "you"); err != nil {
+		t.Fatal(err)
+	}
+	f.from("s1", Origin{TaskHint: id}, "UserPromptSubmit", P{"prompt": "do it"})
+	eq(t, []string{f.task(id).Title, f.task(id).Prompt}, []string{"Planned work", ""})
+}
+
 func TestSessionStartClearBeforeTheOldSessionEnd(t *testing.T) {
 	f := newFixture(t)
 	pane := Origin{Pane: "%1"}
 	f.from("s1", pane, "UserPromptSubmit", P{"prompt": "first"})
-	eq(t, f.from("s2", pane, "SessionStart", P{"source": "clear"}), "s1")
+	f.from("s0", Origin{Pane: "%2"}, "UserPromptSubmit", P{"prompt": "elsewhere"})
+	f.st.Exec("UPDATE sessions SET task_id = 's1' WHERE session_id = 's0'")
+	eq(t, f.from("s2", pane, "SessionStart", P{"source": "clear"}), "s2")
+	// The cleared session is over, so nothing reaches its pane through the old task; another pane goes on.
+	eq(t, []bool{f.session("s1").Live, f.session("s0").Live}, []bool{false, true})
 	f.from("s1", pane, "SessionEnd", nil)
-	// The new session is live on the same task, so the task is not parked in review.
-	eq(t, f.task("s1").State, "running")
+	// Closed already: the end of its session does not park it in review.
+	eq(t, f.task("s1").State, "done")
+	eq(t, f.task("s2").State, "backlog")
+}
+
+func TestSessionStartClearOfASessionTheBoardStarted(t *testing.T) {
+	f := newFixture(t)
+	const id = "task-0001-aaaa"
+	if _, err := f.st.CreateTask(store.Task{ID: id, Title: "Planned work", Prompt: "do it"}, "you"); err != nil {
+		t.Fatal(err)
+	}
+	// The process keeps HC_TASK across a /clear, so every session in it carries the hint.
+	hinted := Origin{Pane: "%1", TaskHint: id}
+	eq(t, f.from("s1", hinted, "UserPromptSubmit", P{"prompt": "do it"}), id)
+	eq(t, f.from("s2", hinted, "SessionStart", P{"source": "clear"}), "s2")
+	eq(t, f.task(id).State, "done")
+	eq(t, f.from("s2", hinted, "UserPromptSubmit", P{"prompt": "next"}), "s2")
+	// The pane wins over the hint: a compaction goes on with the task the /clear opened.
+	eq(t, f.from("s3", hinted, "SessionStart", P{"source": "compact"}), "s2")
+	// Outside tmux and Herdr, the hint names the task.
+	f2 := newFixture(t)
+	if _, err := f2.st.CreateTask(store.Task{ID: id, Title: "Planned work", Prompt: "do it"}, "you"); err != nil {
+		t.Fatal(err)
+	}
+	bare := Origin{TaskHint: id}
+	f2.from("s1", bare, "UserPromptSubmit", P{"prompt": "do it"})
+	eq(t, f2.from("s2", bare, "SessionStart", P{"source": "clear"}), "s2")
+	eq(t, f2.task(id).State, "done")
+}
+
+func TestSessionStartClearAfterAResetKeepsTheTask(t *testing.T) {
+	f := newFixture(t)
+	pane := Origin{Pane: "%1"}
+	f.from("s1", pane, "UserPromptSubmit", P{"prompt": "first"})
+	f.from("s1", pane, "Stop", P{"last_assistant_message": "Halfway."})
+	f.move("s1", "done", nil) // closed by hand, yet hc reset asks for the same task
+	reset := func(at float64) {
+		t.Helper()
+		if err := f.st.AddMessage(store.Message{TaskID: "s1", Sender: FromYou, Kind: "reset", Text: "/clear", At: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset(store.Now())
+	eq(t, f.from("s2", pane, "SessionStart", P{"source": "clear"}), "s1")
+	eq(t, f.count("tasks"), 1)
+	eq(t, f.task("s1").Title, "first")
+	// A reset counts once: the next /clear is yours.
+	eq(t, f.from("s3", pane, "SessionStart", P{"source": "clear"}), "s3")
+	eq(t, f.task("s1").State, "done")
+
+	// A reset long gone does not count either.
+	f = newFixture(t)
+	f.from("s1", pane, "UserPromptSubmit", P{"prompt": "first"})
+	reset(store.Now() - 2*resetWindow)
+	eq(t, f.from("s2", pane, "SessionStart", P{"source": "clear"}), "s2")
 }
 
 func TestSessionStartThatDoesNotLink(t *testing.T) {
@@ -710,23 +821,21 @@ func TestSessionStartThatDoesNotLink(t *testing.T) {
 	eq(t, f.from("s3", Origin{}, "SessionStart", P{"source": "clear"}), "")           // no pane
 }
 
-func TestSessionStartClearKeepsADoneTask(t *testing.T) {
+func TestSessionStartCompactKeepsADoneTask(t *testing.T) {
 	f := newFixture(t)
 	pane := Origin{Pane: "%1"}
 	f.from("s1", pane, "UserPromptSubmit", P{"prompt": "first"})
 	f.from("s1", pane, "Stop", P{"last_assistant_message": "Shipped."})
 	eq(t, f.task("s1").State, "done")
-	f.from("s1", pane, "SessionEnd", P{"reason": "clear"})
-	eq(t, f.from("s2", pane, "SessionStart", P{"source": "clear"}), "s1")
+	eq(t, f.from("s2", pane, "SessionStart", P{"source": "compact"}), "s1")
 	f.from("s2", pane, "UserPromptSubmit", P{"prompt": "one more thing"})
 	eq(t, []string{f.task("s1").State, fmt.Sprint(f.count("tasks"))}, []string{"running", "1"})
-	// Moved to Done by you, it is closed: the next /clear starts a new task.
+	// Moved to Done by you, it is closed: what follows the compaction is a new task.
 	f.move("s1", "done", nil)
-	f.from("s2", pane, "SessionEnd", P{"reason": "clear"})
-	eq(t, f.from("s3", pane, "SessionStart", P{"source": "clear"}), "")
+	eq(t, f.from("s3", pane, "SessionStart", P{"source": "compact"}), "")
 }
 
-func TestSessionStartClearOnlyConsidersTheLatestSessionOfThePane(t *testing.T) {
+func TestSessionStartOnlyConsidersTheLatestSessionOfThePane(t *testing.T) {
 	f := newFixture(t)
 	pane := Origin{Pane: "%1"}
 	f.from("sA", pane, "UserPromptSubmit", P{"prompt": "old task"})
@@ -736,7 +845,13 @@ func TestSessionStartClearOnlyConsidersTheLatestSessionOfThePane(t *testing.T) {
 	f.from("sB", pane, "SessionStart", P{"source": "startup"})
 	f.from("sB", pane, "UserPromptSubmit", P{"prompt": "new task"})
 	f.from("sB", pane, "SessionEnd", P{"reason": "clear"})
-	eq(t, f.from("sC", pane, "SessionStart", P{"source": "clear"}), "sB")
+	eq(t, f.from("sC", pane, "SessionStart", P{"source": "compact"}), "sB")
+	eq(t, f.task("sA").State, "done")
+	// Another Herdr server's pane of the same id is another pane.
+	herdr := Origin{HerdrPane: "w1-p1", HerdrSocket: "/run/herdr.sock"}
+	f.from("sD", herdr, "UserPromptSubmit", P{"prompt": "in herdr"})
+	eq(t, f.from("sE", Origin{HerdrPane: "w1-p1", HerdrSocket: "/run/other.sock"}, "SessionStart",
+		P{"source": "compact"}), "")
 }
 
 // --- the X-HC-Task hint --------------------------------------------------------------
