@@ -38,11 +38,13 @@ func TestMeta(t *testing.T) {
 	eq(t, states, []string{"backlog", "running", "needs", "review", "parked", "done"})
 	eq(t, meta["profiles"], []any{"team", "personal"})
 	eq(t, dirs, []string{f.tmp, filepath.Join(f.tmp, "roots", "group", "repo-b"), filepath.Join(f.tmp, "roots", "repo-a")})
-	if !sort.StringsAreSorted(dirs) || meta["tmux"] != true || meta["version"] == "" || meta["private_tmux"] != false {
+	if !sort.StringsAreSorted(dirs) || meta["tmux"] != true || meta["version"] == "" || meta["private_tmux"] != false || meta["theme"] != "terminal" {
 		t.Errorf("meta = %v", meta)
 	}
 	f.tmux.available = false
 	eq(t, f.get("/api/meta").data["tmux"], false)
+	f.cfg.Theme = "nord"
+	eq(t, f.get("/api/meta").data["theme"], "nord")
 }
 
 func TestIndexPage(t *testing.T) {

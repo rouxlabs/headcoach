@@ -1079,7 +1079,7 @@ func (s *Server) meta(r *http.Request) (any, error) {
 	sort.Strings(dirs)
 	meta := api.Meta{
 		Version: version.Version, Profiles: s.cfg.ProfileNames(), Dirs: dirs,
-		Tmux: s.canOpen(), PrivateTmux: s.cfg.PrivateTmux,
+		Tmux: s.canOpen(), PrivateTmux: s.cfg.PrivateTmux, Theme: s.cfg.Theme,
 	}
 	for _, id := range store.States {
 		meta.States = append(meta.States, api.State{ID: id, Name: store.StateNames[id]})

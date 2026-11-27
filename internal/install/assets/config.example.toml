@@ -37,8 +37,9 @@ ask_model = "haiku"
 # last one a session ran passed or failed. It matches where a command starts; an empty one turns it off.
 # test_pattern = '\b(make (check|test)|go test|cargo test|pytest|tox|(npm|pnpm|yarn|bun) (run )?test|mvn (verify|test)|gradlew? (check|test)|ctest|rspec|phpunit)\b'
 
-# Color theme of the terminal board: terminal (follows your terminal colors), bright, nord or k9s.
-# Try one with: hc tui --theme k9s
+# Color theme of the terminal and web boards: terminal (follows your terminal colors, or the system's
+# light or dark mode in the browser), bright, nord or k9s.
+# Try one with: hc tui --theme k9s, or with the Theme menu of the web board, which only that browser keeps
 theme = "terminal"
 
 # Folder that a bare name given to `hc new --dir` or to the board's "New task" resolves under:

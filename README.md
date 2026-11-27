@@ -144,6 +144,7 @@ Then:
 - `private_tmux = false` opens the board's sessions as windows in your tmux instead
 - a session you start in a [Herdr](https://herdr.dev) pane is tracked with that pane, and the board shows `herdr` where it runs
 - a `/clear` or a compaction there is followed by its pane, as in tmux
+- the web board marks each live session on its card, its list row and its panel: `hc` in the board's tmux, `tmux` in yours, `herdr` in a Herdr pane
 - a pane moved to another workspace changes its id: the board finds it again by its session id, or, without Herdr's Claude Code integration, as the only agent in the session's directory that no other session holds
 - with two such agents it cannot tell which one is the session: it takes no reply and is not resumed, answer it in Herdr
 - `hc reply` sends to it with `herdr agent prompt`, `hc keys` with `herdr agent send-keys`
@@ -295,7 +296,8 @@ Then:
 - `hc config init` writes `~/.config/headcoach/config.toml`, with every key explained
 - `hc hooks install -c ~/.claude-team -c ~/.claude-personal` covers several Claude Code profiles
 - one `[profiles]` line per profile tells the board how to launch it
-- `theme` picks the board's colors: `terminal` (follows your terminal), `bright`, `nord` or `k9s`
+- `theme` picks the colors of the terminal and web boards: `terminal` (follows your terminal, or the system's light or dark mode in the browser), `bright`, `nord` or `k9s`
+- the Theme menu of the web board picks another one for that browser only, and `<theme> (config)` follows the config again
 - `hc tui --theme k9s` tries a theme without touching the config
 - `C` on the board saves its columns to `columns` next to the board's database, one name per line, a hidden one after a `-`
 - `welcomed` next to the board's database says the board showed its welcome; delete it to see the welcome again

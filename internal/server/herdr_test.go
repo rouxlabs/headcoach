@@ -153,6 +153,21 @@ func TestAMovedPaneWithoutSessionIdIsFoundByItsDirectory(t *testing.T) {
 	eq(t, []int{len(f.herdr.prompted), len(f.tmux.sessions)}, []int{1, 0})
 }
 
+func TestTheListSaysWhereEachSessionRuns(t *testing.T) {
+	f := newPrivate(t)
+	herdrID, _ := f.inHerdr()
+	f.tmux.known["%1"] = true
+	ownID := f.hook("UserPromptSubmit", "s2", obj{"prompt": "hi"})
+	f.tmux.privateKnown["%0"] = true
+	boardID := f.hook("UserPromptSubmit", "s3", obj{"prompt": "hi"}, "X-Tmux-Pane", "%0", "X-Tmux-Socket", f.cfg.TmuxSocket())
+	closedID := f.hook("UserPromptSubmit", "s4", obj{"prompt": "hi"}, "X-Tmux-Pane", "%9")
+	where := map[string]any{}
+	for _, task := range f.ok(f.get("/api/tasks")).data["tasks"].([]any) {
+		where[task.(obj)["id"].(string)] = task.(obj)["tmux"]
+	}
+	eq(t, []any{where[herdrID], where[ownID], where[boardID], where[closedID]}, []any{"herdr", "own", "hc", ""})
+}
+
 func TestAttachGoesThroughHerdrUnlessTmuxHasTheSession(t *testing.T) {
 	f := newPrivate(t)
 	id, socket := f.inHerdr()

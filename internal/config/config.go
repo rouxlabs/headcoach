@@ -42,7 +42,7 @@ type Config struct {
 	PersonaPattern string
 	// TestPattern matches the shell commands that run a repository's tests, for the review queue.
 	TestPattern string
-	// Theme is the color theme of the terminal board.
+	// Theme is the color theme of the terminal board, and the one the web board starts with.
 	Theme string
 	// Workdir is the folder a bare name given to `hc new --dir` resolves under.
 	Workdir string
