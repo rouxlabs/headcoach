@@ -331,6 +331,13 @@ func TestTeam(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.ok("team", "--json")), &team); err != nil || len(team.Members) != 2 || team.Members[1].Depth != 1 {
 		t.Errorf("--json: %+v %v", team, err)
 	}
+	// rm takes the tasks under it along, and says how many.
+	if out := f.ok("rm", "abcd"); out != "deleted abcd1234 with 2 tasks under it\n" {
+		t.Errorf("rm of a parent printed %q", out)
+	}
+	if out := f.ok("ls"); strings.Contains(out, "Child") {
+		t.Errorf("a child outlived its parent:\n%s", out)
+	}
 }
 
 // hc handoff prints a task's handoff, init writes the template, path says where it goes; show sums it up.

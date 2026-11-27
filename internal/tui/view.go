@@ -59,7 +59,7 @@ n               new task: its folder (tab lists the folders, a missing one is cr
                 several are configured, then its title; the terminal then drops into the new
                 session, where you type the prompt yourself
 c               copy: a new task in the folder and with the profile of this one; you give its title
-x               delete the task (the Claude session is kept)
+x               delete the task and the tasks under it (the Claude sessions are kept)
 X               delete the task in 10 minutes, without a question; X again keeps it
 v               select: space ticks the task under the cursor, then x deletes, m moves, p parks or h hides
                 every ticked task after one y / n, escape leaves

@@ -241,7 +241,7 @@ func TestPrefixResolution(t *testing.T) {
 		f.wantError(f.post("/api/tasks/zzzz/"+action, obj{"text": "x"}), 404)
 	}
 	eq(t, f.task("aaaa1111-x").Title, "aaaa1111-x")
-	eq(t, f.do("DELETE", "/api/tasks/bbbb3", nil).data, obj{"deleted": "bbbb3333-x"})
+	eq(t, f.do("DELETE", "/api/tasks/bbbb3", nil).data, obj{"deleted": "bbbb3333-x", "children": []any{}})
 	eq(t, f.count("tasks"), 4)
 }
 
@@ -478,7 +478,7 @@ func TestDelete(t *testing.T) {
 	f := newFixture(t)
 	id := f.live()
 	f.hook("SubagentStart", "s1", obj{"agent_id": "a1", "agent_type": "Explore"})
-	eq(t, f.do("DELETE", "/api/tasks/"+id, nil).data, obj{"deleted": id})
+	eq(t, f.do("DELETE", "/api/tasks/"+id, nil).data, obj{"deleted": id, "children": []any{}})
 	eq(t, []int{f.count("tasks"), f.count("history"), f.count("agents")}, []int{0, 0, 0})
 	eq(t, f.session("s1").TaskID, "")
 	f.wantError(f.get("/api/tasks/"+id), 404)

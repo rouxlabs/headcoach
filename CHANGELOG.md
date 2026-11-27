@@ -14,6 +14,7 @@ All notable changes to headcoach. The format follows [Keep a Changelog](https://
 
 - a `/clear` you type closes the task as `Done` and starts a new one in `Backlog`, named by its first prompt: the board used to keep the old card, its title and its state, for an empty session; `hc reset` and a compaction still keep the task, and a session in a Herdr pane now keeps it across a compaction too
 - a window too narrow for six columns, but wider than a phone, scrolls the web board's columns sideways instead of stacking them, so each stays a drop target
+- deleting a task deletes the tasks it drives too, at any depth: `x` and the web board's Delete say how many go with it, `hc rm` prints it, and `X` takes them along when its 10 minutes are up; they used to stay on the board, at the top
 
 ### Fixed
 
