@@ -44,7 +44,7 @@ func TestDefaultsWhenTheFileIsMissing(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Profiles, []Profile{{"default", "claude"}}) {
 		t.Errorf("profiles = %v", cfg.Profiles)
 	}
-	if len(cfg.RepoRoots) != 0 || cfg.TmuxSession != "" || !cfg.PrivateTmux {
+	if len(cfg.RepoRoots) != 0 || cfg.TmuxSession != "" || !cfg.PrivateTmux || cfg.Mouse {
 		t.Errorf("unexpected defaults: %+v", cfg)
 	}
 	if want := filepath.Join(tmp, "default-state", "board.db"); cfg.DB != want {
@@ -61,6 +61,7 @@ db = "`+tmp+`/data/board.db"
 repo_roots = ["~/code", "/srv/repos"]
 tmux_session = "main"
 private_tmux = false
+mouse = true
 [profiles]
 team = "claude-team"
 personal = "claude-personal --verbose"
@@ -81,6 +82,9 @@ personal = "claude-personal --verbose"
 	}
 	if cfg.TmuxSession != "main" || cfg.PrivateTmux || cfg.TmuxSocket() != "" {
 		t.Errorf("tmux = %q %v %q", cfg.TmuxSession, cfg.PrivateTmux, cfg.TmuxSocket())
+	}
+	if !cfg.Mouse {
+		t.Error("mouse = true was not read")
 	}
 }
 

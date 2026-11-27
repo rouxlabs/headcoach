@@ -203,6 +203,13 @@ type model struct {
 
 	detail   viewport.Model
 	detailID string
+	// The detail before its links are marked, and the task it shows, which is never a link.
+	detailCells []cell
+	detailSelf  string
+	links       []link // the task ids the detail names, in the order of its text
+	linking     bool   // tab picks a link: linkAt is the one picked
+	linkAt      int
+	mouseOn     bool // the board takes the mouse: a click on a link of the detail opens it
 
 	pickTask  api.Task
 	pickBatch bool // the picker moves the ticked tasks of select mode, not pickTask
@@ -231,7 +238,7 @@ func newModel(c *client.Client) model {
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.poll(), tick()}
+	cmds := []tea.Cmd{m.poll(), tick(), m.takeMouse()}
 	switch m.view { // a view a reload put back loads at once, not at the next tick
 	case viewDetail:
 		cmds = append(cmds, m.loadDetail())
@@ -243,6 +250,15 @@ func (m model) Init() tea.Cmd {
 		cmds = append(cmds, m.loadTeam())
 	}
 	return tea.Batch(cmds...)
+}
+
+// takeMouse turns the mouse on, when the config asks for it: at the start, and again once a session or
+// a diff gives the terminal back, which leaves it off.
+func (m model) takeMouse() tea.Cmd {
+	if !m.mouseOn {
+		return nil
+	}
+	return tea.EnableMouseCellMotion
 }
 
 func tick() tea.Cmd { return tea.Tick(refresh, func(time.Time) tea.Msg { return tickMsg{} }) }
@@ -854,11 +870,6 @@ func (m *model) welcome(path string, show bool) {
 	}
 }
 
-func (m *model) setDetail(cells []cell) {
-	// Wrapped to the width of the screen: a long line of the log must not run off it.
-	m.detail.SetContent(lipgloss.NewStyle().Width(max(20, m.width-2)).Render(renderLines(cells)))
-}
-
 // --- update --------------------------------------------------------------------------
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -937,7 +948,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.say("The diff could not be shown: "+msg.err.Error(), true)
 		}
-		return m, nil
+		return m, m.takeMouse()
 
 	case schedulesMsg:
 		if msg.err != nil {
@@ -1015,9 +1026,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.setDetail([]cell{c(msg.err.Error(), alarm)})
+			m.setDetail([]cell{c(msg.err.Error(), alarm)}, "")
 		} else if msg.task.ID == m.detailID || strings.HasPrefix(msg.task.ID, m.detailID) {
-			m.setDetail(describe(&msg.task))
+			m.setDetail(describe(&msg.task), msg.task.ID)
 			if m.restoreDetail > 0 {
 				m.detail.SetYOffset(m.restoreDetail)
 				m.restoreDetail = 0
@@ -1085,10 +1096,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.say("The session could not be entered: "+msg.err.Error(), true)
 		}
 		m.jump = msg.taskID // come back on the row that was entered, wherever it has moved to
-		return m, m.poll()
+		return m, tea.Batch(m.poll(), m.takeMouse())
 
 	case tea.KeyMsg:
 		return m.key(msg)
+
+	case tea.MouseMsg:
+		return m.mouse(msg)
 	}
 	return m, nil
 }
@@ -1106,9 +1120,12 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch m.view {
 	case viewDetail:
+		if cmd, took := m.linkKey(key); took {
+			return m, cmd
+		}
 		switch key {
 		case "esc", "q":
-			m.view = viewBoard
+			m.view, m.linking = viewBoard, false
 			return m, nil
 		case "g", "home":
 			m.detail.GotoTop()
@@ -1513,10 +1530,7 @@ func (m model) boardKey(key string) (tea.Model, tea.Cmd) {
 	path := "/api/tasks/" + t.ID
 	switch key {
 	case "enter":
-		m.view, m.detailID, m.restoreDetail = viewDetail, t.ID, 0 // another task's detail opens at its top
-		m.detail.GotoTop()
-		m.setDetail([]cell{c("Loading "+t.Short, dim)})
-		return m, m.loadDetail()
+		return m, m.openDetail(t)
 	case "r":
 		if t.AskKind == "permission" {
 			m.say(permission, true)
@@ -1628,7 +1642,7 @@ func (m model) boardKey(key string) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	switch m.view {
 	case viewDetail:
-		return m.detail.View() + "\n" + dim.Render(" j/k, arrows, pgup/pgdn scroll  g/G top or bottom  escape or q back")
+		return m.detail.View() + "\n" + m.detailFooter()
 	case viewPick:
 		var lines []string
 		for i, state := range store.States {
@@ -1779,8 +1793,9 @@ func (m model) centered(content string) string {
 // Run opens the terminal board, drawn in the named theme, and returns when it is closed.
 // workdir is where a bare folder name typed into "New task" lands, and profiles are the
 // configured profiles that "New task" offers.
-// The columns of the board are read from, and saved to, columnsPath.
-func Run(c *client.Client, theme, workdir string, profiles []string, columnsPath, welcomePath string) error {
+// The columns of the board are read from, and saved to, columnsPath. With mouse the board takes the
+// mouse: a click on a task id in the detail of a task opens that task.
+func Run(c *client.Client, theme, workdir string, profiles []string, columnsPath, welcomePath string, mouse bool) error {
 	if err := setTheme(theme); err != nil {
 		return err
 	}
@@ -1795,7 +1810,7 @@ func Run(c *client.Client, theme, workdir string, profiles []string, columnsPath
 	}()
 
 	m := newModel(c)
-	m.workdir, m.profiles = workdir, profiles
+	m.workdir, m.profiles, m.mouseOn = workdir, profiles, mouse
 	m.layout, m.layoutPath = readLayout(columnsPath), columnsPath
 	// A reload after an update hands over the view of the board it replaces. It is for this board
 	// only, not for the sessions it opens.

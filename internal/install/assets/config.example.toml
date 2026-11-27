@@ -46,6 +46,11 @@ theme = "terminal"
 # with it, -C myidea means ~/code/myidea. A missing folder is created after a y/n prompt.
 # workdir = "~/code"
 
+# The terminal board takes the mouse: a click on a task id in the detail of a task opens that task.
+# Your terminal no longer selects text with a plain drag then: hold Option on macOS, Shift elsewhere.
+# Without it, tab picks the task ids in turn and enter opens one.
+mouse = false
+
 # Profile name = command that launches Claude Code for it.
 # A session whose CLAUDE_CONFIG_DIR ends with the profile name is filed under that profile.
 # With several accounts, name one profile per CLAUDE_CONFIG_DIR, for example:

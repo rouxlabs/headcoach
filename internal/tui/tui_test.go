@@ -156,6 +156,8 @@ func press(t *testing.T, m model, keys ...string) (model, tea.Cmd) {
 			msg = tea.KeyMsg{Type: tea.KeyUp}
 		case "tab":
 			msg = tea.KeyMsg{Type: tea.KeyTab}
+		case "shift+tab":
+			msg = tea.KeyMsg{Type: tea.KeyShiftTab}
 		case "pgdown":
 			msg = tea.KeyMsg{Type: tea.KeyPgDown}
 		case "pgup":

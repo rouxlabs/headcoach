@@ -46,6 +46,8 @@ type Config struct {
 	Theme string
 	// Workdir is the folder a bare name given to `hc new --dir` resolves under.
 	Workdir string
+	// Mouse lets the terminal board take the mouse: a click on a task id in a task's detail opens it.
+	Mouse bool
 }
 
 func xdg(env, fallback string) string {
@@ -112,6 +114,7 @@ type file struct {
 	TestPattern    *string           `toml:"test_pattern"`
 	Theme          *string           `toml:"theme"`
 	Workdir        *string           `toml:"workdir"`
+	Mouse          *bool             `toml:"mouse"`
 }
 
 // Load reads the config file at path, or at Path() when path is empty. A missing file is not an error.
@@ -158,6 +161,7 @@ func Load(path string) (*Config, error) {
 		if raw.Workdir != nil {
 			cfg.Workdir = ExpandUser(*raw.Workdir)
 		}
+		set(&cfg.Mouse, raw.Mouse)
 	}
 	if theme := os.Getenv("HC_THEME"); theme != "" {
 		cfg.Theme = theme

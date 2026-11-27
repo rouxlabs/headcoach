@@ -26,6 +26,8 @@ var (
 	heading lipgloss.Style // the column headings of the table
 	accent  lipgloss.Style
 	alarm   lipgloss.Style
+	// linkStyle marks a task id the detail of a task names: tab picks it, enter or a click opens it.
+	linkStyle lipgloss.Style
 
 	// stateStyles colours a state, of a task or of a child row.
 	stateStyles map[string]lipgloss.Style
@@ -48,6 +50,9 @@ g / G           go to the top or the bottom; pgup / pgdn move a page
 a               attach: enter the session in this terminal, Ctrl-] comes back; a sub-agent enters
                 its main session
 enter           open the task: metadata, history, session log
+tab             in an open task: pick in turn the ids of the tasks it names, shift+tab goes back,
+                enter opens the one picked, escape stops; with mouse = true in the config, a click
+                opens one, and Option-drag on macOS or Shift-drag elsewhere selects text
 r               reply to the session; on a question, answer it in its "Type something" option
 q               question: ask about the session without touching it; enter alone gives a summary
 t               title: rename the task

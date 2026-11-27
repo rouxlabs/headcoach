@@ -942,7 +942,7 @@ func cmdTUI(e *env, p parsed) error {
 	}
 	state := filepath.Dir(cfg.DB)
 	return runTUI(e.client, p.get("theme", cfg.Theme), cfg.Workdir, cfg.ProfileNames(),
-		filepath.Join(state, "columns"), filepath.Join(state, "welcomed"))
+		filepath.Join(state, "columns"), filepath.Join(state, "welcomed"), cfg.Mouse)
 }
 
 // --- setup ---------------------------------------------------------------------------
