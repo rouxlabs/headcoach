@@ -75,6 +75,7 @@ Then:
 | `j` `k`, arrows | move the cursor; `g` `G` go to the top or the bottom, `pgup` `pgdn` move a page |
 | `a` | enter the session, `Ctrl-]` comes back; on a sub-agent, its main session |
 | `enter` | open the session: details, history, log |
+| `tab` | in an open session, pick in turn the ids of the tasks it names, such as those a coordinator created, Done ones too: `enter` opens the one picked, `shift+tab` goes back, `esc` stops; with `mouse = true`, a click opens one |
 | `q` | ask about the session without touching it |
 | `r` | reply to the session; on a question, the answer goes in its "Type something" option |
 | `n` | new session: its folder, its profile, then its title; `tab` lists the folders |
@@ -306,6 +307,7 @@ Then:
 - `test_pattern` names the commands that run tests, for the review queue, by default `make check`, `go test`, `npm test`, `pytest` and the like; `""` turns it off
 - `persona_pattern` names the skills that count as a persona, by default `(^|[-_])(developer|reviewer|architect|researcher|planner|tester)($|[-_])`
 - `workdir = "~/code"` makes `hc new -C myidea` mean `~/code/myidea`
+- `mouse = true` lets a click on a task id in an open session open that task; the board then takes the mouse, so Option-drag on macOS or Shift-drag elsewhere selects text
 - a `--dir` folder that does not exist yet is created after a y/n prompt
 
 ## Uninstall

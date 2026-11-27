@@ -93,6 +93,7 @@ func applyTheme(p palette) {
 		heading = dim.Bold(true)
 	}
 	accent = fg(p.accent).Bold(true)
+	linkStyle = fg(p.accent).Underline(true)
 	alarm = fg(p.alarm).Bold(true)
 	stateStyles = map[string]lipgloss.Style{
 		"running": fg(p.running),
