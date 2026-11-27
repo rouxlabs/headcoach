@@ -34,6 +34,16 @@ func TestHookStoresTheHerdrPane(t *testing.T) {
 	eq(t, []string{f.session("s1").HerdrPane, f.session("s2").HerdrPane}, []string{"w1:p2", ""})
 }
 
+func TestHookInTmuxIgnoresTheHerdrPaneTmuxWasStartedFrom(t *testing.T) {
+	f := newPrivate(t)
+	socket := filepath.Join(f.tmp, "herdr.sock")
+	f.herdr.agents[socket] = map[string]herdr.Agent{"w1:p2": {Cwd: "/w/repo"}}
+	f.hook("SessionStart", "s1", obj{"cwd": "/w/repo"}, "X-Tmux-Pane", "%0", "X-Tmux-Socket", f.cfg.TmuxSocket(),
+		"X-Herdr-Pane", "w1:p2", "X-Herdr-Socket", socket)
+	sess := f.session("s1")
+	eq(t, []string{sess.Pane, sess.HerdrPane, sess.HerdrSocket}, []string{"%0", "", ""})
+}
+
 func TestReplyGoesToTheHerdrPane(t *testing.T) {
 	f := newFixture(t)
 	id, socket := f.inHerdr()

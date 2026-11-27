@@ -4,6 +4,11 @@ All notable changes to headcoach. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+### Fixed
+
+- sessions in the board's tmux no longer inherit the environment of the terminal that first started it, such as the `HERDR_*`, `DIRENV_*` and `CLAUDE_*` variables of a Claude Code session in a Herdr pane, and a server already started that way is cleaned before the next session opens
+- a session in tmux is no longer recorded with the Herdr pane that tmux was started from, where a reply could land once its tmux pane closed
+
 ## [1.2.0] - 2026-11-26
 
 Sessions you start in a [Herdr](https://herdr.dev) pane now show on the board, and you answer them from the board or your phone like any other. The web board also fits a phone, and headcoach has a website: [headcoach.rouxlabs.dev](https://headcoach.rouxlabs.dev).

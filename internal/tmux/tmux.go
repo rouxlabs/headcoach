@@ -3,7 +3,10 @@ package tmux
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -83,6 +86,118 @@ type Client struct {
 	cache map[string]paneCache // by socket
 }
 
+// dropped are the variables of the terminal, multiplexer or agent the process that starts the board's
+// server runs in. Every task would inherit them from the server, though none of them runs there.
+var dropped = map[string]bool{
+	"TMUX": true, "TMUX_PANE": true, "STY": true, "WINDOWID": true, "WT_SESSION": true, "WEZTERM_PANE": true,
+	"KITTY_WINDOW_ID": true, "TERM_PROGRAM": true, "TERM_PROGRAM_VERSION": true, "TERM_SESSION_ID": true,
+	"LC_TERMINAL": true, "LC_TERMINAL_VERSION": true, "GIT_ASKPASS": true, "CLAUDECODE": true, "AI_AGENT": true,
+	"CODEX_THREAD_ID": true, "HC_IGNORE": true, "HC_TASK": true, "HC_HANDOFF": true,
+	"PWD": true, "OLDPWD": true, "SHLVL": true, "_": true,
+}
+
+var droppedPrefixes = []string{"HERDR_", "DIRENV_", "CLAUDE_", "ZELLIJ", "ITERM_", "VSCODE_"}
+
+func drop(name string) bool {
+	if dropped[name] {
+		return true
+	}
+	for _, prefix := range droppedPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// cleanEnv is the environment the board's own tmux server starts with: env without the variables of the
+// terminal or agent it was started from, and without what direnv exported there.
+func cleanEnv(env []string) []string {
+	prev, next := direnvDiff(env)
+	var out []string
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if value, ok := prev[name]; ok {
+			kv = name + "=" + value
+			delete(prev, name)
+		} else if _, ok := next[name]; ok {
+			continue
+		}
+		if !drop(name) {
+			out = append(out, kv)
+		}
+	}
+	restored := make([]string, 0, len(prev))
+	for name, value := range prev {
+		if !drop(name) {
+			restored = append(restored, name+"="+value)
+		}
+	}
+	sort.Strings(restored)
+	return append(out, restored...)
+}
+
+// direnvDiff reads what direnv changed, from the DIRENV_DIFF it keeps: the values before and after.
+// A shell would undo it on leaving the directory, but tmux starts a task's shell with no direnv hook.
+func direnvDiff(env []string) (prev, next map[string]string) {
+	for _, kv := range env {
+		encoded, ok := strings.CutPrefix(kv, "DIRENV_DIFF=")
+		if !ok {
+			continue
+		}
+		raw, err := base64.URLEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, nil
+		}
+		r, err := zlib.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			return nil, nil
+		}
+		var diff struct {
+			Prev map[string]string `json:"p"`
+			Next map[string]string `json:"n"`
+		}
+		if json.NewDecoder(r).Decode(&diff) != nil {
+			return nil, nil
+		}
+		return diff.Prev, diff.Next
+	}
+	return nil, nil
+}
+
+// cleanServer takes out of a running server's global environment what cleanEnv leaves out, for a server
+// an older hc started with them. A new window gets the global environment.
+func cleanServer(socket string) {
+	out, err := run(socket, "", "show-environment", "-g")
+	if err != nil {
+		return
+	}
+	var global []string
+	for _, line := range strings.Split(out, "\n") {
+		if line != "" && !strings.HasPrefix(line, "-") && strings.Contains(line, "=") {
+			global = append(global, line)
+		}
+	}
+	kept := map[string]string{}
+	for _, kv := range cleanEnv(global) {
+		name, value, _ := strings.Cut(kv, "=")
+		kept[name] = value
+	}
+	// One command each: tmux reads a trailing ; as the end of a command, so it spoils only its own.
+	for _, kv := range global {
+		name, value, _ := strings.Cut(kv, "=")
+		if now, ok := kept[name]; !ok {
+			_, _ = run(socket, "", "set-environment", "-g", "-u", "--", name)
+		} else if now != value {
+			_, _ = run(socket, "", "set-environment", "-g", "--", name, now)
+		}
+		delete(kept, name)
+	}
+	for name, value := range kept {
+		_, _ = run(socket, "", "set-environment", "-g", "--", name, value)
+	}
+}
+
 // run runs one tmux command. socket picks the server; empty means the default one.
 func run(socket, stdin string, args ...string) (string, error) {
 	if socket != "" {
@@ -91,6 +206,10 @@ func run(socket, stdin string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "tmux", args...)
+	if socket != "" {
+		// A command that starts the server hands it this environment for good. Without -S, TMUX picks the server.
+		cmd.Env = cleanEnv(os.Environ())
+	}
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -290,6 +409,7 @@ func (c *Client) NewSession(w Window) (string, error) {
 	for n := 2; taken[unique]; n++ {
 		unique = fmt.Sprintf("%s-%d", w.Name, n)
 	}
+	cleanServer(w.Socket)
 	w.Session = "" // a session of its own, not a window in another
 	args := append([]string{"-f", w.Conf, "new-session", "-d", "-P", "-F", "#{pane_id}", "-s", unique, "-n", w.Name},
 		w.args()...)

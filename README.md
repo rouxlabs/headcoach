@@ -135,6 +135,9 @@ Then:
 
 - sessions started from the board run in a tmux server of their own
 - they never show up in your tmux
+- they start without what belongs to the terminal hc was started from: no `TMUX`, `HERDR_*`, `DIRENV_*`, `CLAUDE_*` or terminal ids, and what direnv exported there is undone
+- so a profile's `CLAUDE_CONFIG_DIR` or other Claude Code variables go in its `[profiles]` command or its `settings.json`, as they must for the service
+- a session in tmux is driven through tmux, whatever `HERDR_*` variables that tmux was started with
 - a session you start yourself is tracked too, and stays where you started it
 - closing the board stops nothing
 - `private_tmux = false` opens the board's sessions as windows in your tmux instead

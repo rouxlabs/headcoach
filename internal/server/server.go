@@ -959,7 +959,9 @@ func (s *Server) hook(r *http.Request) (any, error) {
 	if socket := r.Header.Get("X-Tmux-Socket"); origin.Pane != "" && socket != "" {
 		origin.Socket = config.RealPath(socket)
 	}
-	if pane, socket := r.Header.Get("X-Herdr-Pane"), r.Header.Get("X-Herdr-Socket"); pane != "" && socket != "" {
+	// Herdr takes TMUX out of its panes: in a tmux pane, the Herdr variables are those tmux was started with.
+	if pane, socket := r.Header.Get("X-Herdr-Pane"), r.Header.Get("X-Herdr-Socket"); pane != "" && socket != "" &&
+		origin.Pane == "" {
 		origin.HerdrPane, origin.HerdrSocket = pane, config.RealPath(socket)
 	}
 	hadTask := false
