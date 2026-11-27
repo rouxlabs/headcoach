@@ -68,6 +68,10 @@ func TestReset(t *testing.T) {
 		t.Errorf("last = %q", out.str("last"))
 	}
 	eq(t, f.sent(id), []string{"task s1 reset /clear", "hc  message " + brief})
+	// The cleared session comes back in its pane as the same task, where a /clear you type opens a new one.
+	eq(t, f.hook("SessionStart", "s2", obj{"source": "clear"}), id)
+	eq(t, f.hook("SessionStart", "s3", obj{"source": "clear"}), "s3")
+	eq(t, f.task(id).State, "done")
 
 	// No live session: refused.
 	f.hook("SessionEnd", "s1", nil)

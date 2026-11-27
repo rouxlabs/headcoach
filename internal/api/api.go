@@ -131,6 +131,8 @@ type Meta struct {
 	Dirs        []string `json:"dirs"`
 	Tmux        bool     `json:"tmux"`
 	PrivateTmux bool     `json:"private_tmux"`
+	// Theme is the configured color theme, which the web board starts with too.
+	Theme string `json:"theme"`
 }
 
 // Schedule is a schedule as the boards show it.

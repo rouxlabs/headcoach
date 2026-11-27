@@ -38,11 +38,13 @@ func TestMeta(t *testing.T) {
 	eq(t, states, []string{"backlog", "running", "needs", "review", "parked", "done"})
 	eq(t, meta["profiles"], []any{"team", "personal"})
 	eq(t, dirs, []string{f.tmp, filepath.Join(f.tmp, "roots", "group", "repo-b"), filepath.Join(f.tmp, "roots", "repo-a")})
-	if !sort.StringsAreSorted(dirs) || meta["tmux"] != true || meta["version"] == "" || meta["private_tmux"] != false {
+	if !sort.StringsAreSorted(dirs) || meta["tmux"] != true || meta["version"] == "" || meta["private_tmux"] != false || meta["theme"] != "terminal" {
 		t.Errorf("meta = %v", meta)
 	}
 	f.tmux.available = false
 	eq(t, f.get("/api/meta").data["tmux"], false)
+	f.cfg.Theme = "nord"
+	eq(t, f.get("/api/meta").data["theme"], "nord")
 }
 
 func TestIndexPage(t *testing.T) {
@@ -334,6 +336,13 @@ func TestHookNamesTheWindowOnce(t *testing.T) {
 	f.hook("UserPromptSubmit", sid, obj{"prompt": "look at PROJ-42 please"}, "X-Tmux-Pane", "%9")
 	f.hook("UserPromptSubmit", sid, obj{"prompt": "look at PROJ-42 please"}, "X-Tmux-Pane", "%9")
 	eq(t, f.tmux.renamed, []string{"%9|0a1b2c3d-PROJ-42"})
+
+	// A /clear you type opens a new task, and its first prompt names the window again.
+	const next = "1b2c3d4e-0000-4000-8000-000000000002"
+	f.hook("SessionStart", next, obj{"source": "clear"}, "X-Tmux-Pane", "%9")
+	f.hook("UserPromptSubmit", next, obj{"prompt": "write the docs"}, "X-Tmux-Pane", "%9")
+	f.hook("UserPromptSubmit", next, obj{"prompt": "and the tests"}, "X-Tmux-Pane", "%9")
+	eq(t, f.tmux.renamed, []string{"%9|0a1b2c3d-PROJ-42", "%9|1b2c3d4e-cleared-session", "%9|1b2c3d4e-write-the-docs"})
 }
 
 func TestReply(t *testing.T) {

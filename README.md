@@ -19,6 +19,7 @@ The same board in the browser:
 ## What it does
 
 - every Claude Code session becomes a task on the board the moment you send its first prompt
+- a `/clear` you type closes the task as `Done` and starts a new one in `Backlog`, named by its first prompt; a compaction keeps the task, and so does `hc reset`
 - each task shows its state: `Backlog`, `Running`, `Needs me`, `Review`, `Parked` or `Done`
 - `Waiting` is a running task that waits on its sub-agents or background jobs
 - a turn that ends on a question, or on an ask such as `Reply "go"` outside a plan, goes to `Needs me`
@@ -142,6 +143,8 @@ Then:
 - closing the board stops nothing
 - `private_tmux = false` opens the board's sessions as windows in your tmux instead
 - a session you start in a [Herdr](https://herdr.dev) pane is tracked with that pane, and the board shows `herdr` where it runs
+- a `/clear` or a compaction there is followed by its pane, as in tmux
+- the web board marks each live session on its card, its list row and its panel: `hc` in the board's tmux, `tmux` in yours, `herdr` in a Herdr pane
 - a pane moved to another workspace changes its id: the board finds it again by its session id, or, without Herdr's Claude Code integration, as the only agent in the session's directory that no other session holds
 - with two such agents it cannot tell which one is the session: it takes no reply and is not resumed, answer it in Herdr
 - `hc reply` sends to it with `herdr agent prompt`, `hc keys` with `herdr agent send-keys`
@@ -239,7 +242,7 @@ Then:
 - its sections, each optional: `## Status`, `## Running`, `## Waiting` with one `- on <who>: <what>` line each, `## Next`, and a `## Queue` of `- [ ]` and `- [x]` items
 - `<who>` is `you`, a task id, or anything else such as `ci`; HTML comments are guidance and never count
 - `hc show`, the detail and the web board sum it up: its status, what waits on whom, what is next, and the queue
-- `hc reset <task>` clears a task's context between two turns, then points the fresh one at its handoff; it refuses while the task works, and without a handoff that says something
+- `hc reset <task>` clears a task's context between two turns, then points the fresh one at its handoff, on the same task; it refuses while the task works, and without a handoff that says something
 - `hc team [<task>]` is a coordinator's view: the tasks under it at any depth, their state, their queue, and where each stands, the calling task by default
 - it lists first what waits on you among them: a question, a change in `Review`, or a `- on you:` line of a handoff, the coordinator's own included
 - `w` on the board opens the same view for the task under the cursor, or for its parent when it drives none; the web board shows it in the detail of a task that drives others
@@ -293,7 +296,8 @@ Then:
 - `hc config init` writes `~/.config/headcoach/config.toml`, with every key explained
 - `hc hooks install -c ~/.claude-team -c ~/.claude-personal` covers several Claude Code profiles
 - one `[profiles]` line per profile tells the board how to launch it
-- `theme` picks the board's colors: `terminal` (follows your terminal), `bright`, `nord` or `k9s`
+- `theme` picks the colors of the terminal and web boards: `terminal` (follows your terminal, or the system's light or dark mode in the browser), `bright`, `nord` or `k9s`
+- the Theme menu of the web board picks another one for that browser only, and `<theme> (config)` follows the config again
 - `hc tui --theme k9s` tries a theme without touching the config
 - `C` on the board saves its columns to `columns` next to the board's database, one name per line, a hidden one after a `-`
 - `welcomed` next to the board's database says the board showed its welcome; delete it to see the welcome again
