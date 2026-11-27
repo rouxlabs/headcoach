@@ -594,6 +594,15 @@ function topOf(t) {
   }
   return t.id;
 }
+// underCount is how many tasks are under a task at any depth, hidden ones too: a delete takes them all.
+function underCount(id) {
+  const seen = new Set([id]);
+  for (const queue = [id]; queue.length; ) {
+    const up = queue.shift();
+    for (const x of tasks) if (x.parent === up && !seen.has(x.id)) { seen.add(x.id); queue.push(x.id); }
+  }
+  return seen.size - 1;
+}
 // branchHtml draws branches of a tree, or how many tasks a task drives, in the color of its tree.
 const branchHtml = (text, top) => text ? `<span class="tree" style="color: ${teamColor(top)}">${text}</span>` : "";
 const drivesHtml = (kids, top) => branchHtml(kids ? ` \u25be ${kids}` : "", top);
@@ -720,7 +729,7 @@ function renderDrawer() {
         <select id="moveto">${STATES.map(s => `<option value="${s.id}"${s.id === t.state ? " selected" : ""}>${s.name}</option>`).join("")}</select>
         ${inBoard && t.tmux !== "herdr" ? "" : `<button class="btn small" type="button" id="term">${termLabel}</button>`}
         <button class="btn small" type="button" id="pin">${t.pinned ? "Unpin" : "Pin to top"}</button>
-        <button class="btn small danger" type="button" id="del">${confirmDelete ? "Confirm delete" : "Delete"}</button>
+        <button class="btn small danger" type="button" id="del">${!confirmDelete ? "Delete" : underCount(t.id) ? `Confirm delete with ${underCount(t.id)} under it` : "Confirm delete"}</button>
       </div>
     </div>
     ${t.agents.length ? `<div><div class="label">Sub-agents and background jobs</div>${kidsHtml(t, "plain")}</div>` : ""}

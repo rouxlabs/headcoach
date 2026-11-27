@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -50,6 +51,41 @@ func (m model) teamOf(t *api.Task) string {
 		return t.Parent
 	}
 	return t.ID
+}
+
+// under returns the ids of the tasks under a task at any depth, among those on the board.
+func (m model) under(id string) []string {
+	var out []string
+	for queue := []string{id}; len(queue) > 0; queue = queue[1:] {
+		for i := range m.tasks {
+			if t := &m.tasks[i]; t.Parent == queue[0] && t.ID != id && !slices.Contains(out, t.ID) {
+				out, queue = append(out, t.ID), append(queue, t.ID)
+			}
+		}
+	}
+	return out
+}
+
+// deleteOrder puts the ticked tasks under another ticked one first: deleting a task deletes the tasks
+// under it, so one after it would be gone already. It says how many more tasks go with them.
+func (m model) deleteOrder(ids []string) string {
+	under, more := map[string]int{}, map[string]bool{}
+	for _, id := range ids {
+		kids := m.under(id)
+		under[id] = len(kids)
+		for _, kid := range kids {
+			more[kid] = true
+		}
+	}
+	for _, id := range ids {
+		delete(more, id)
+	}
+	// A task has fewer tasks under it than any task above it.
+	slices.SortStableFunc(ids, func(a, b string) int { return under[a] - under[b] })
+	if len(more) == 0 {
+		return ""
+	}
+	return " with " + format.Counted(len(more), "more task") + " under them"
 }
 
 // teamKey handles a key on the coordinator view.

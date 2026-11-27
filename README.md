@@ -95,7 +95,7 @@ Then:
 | `u` | update: install the latest release, after its notes and a yes |
 | `h` | hide a Done task, or show a hidden one again; a Done task stays on the board, dimmed, until you hide it |
 | `d` | show or hide the hidden Done tasks |
-| `x` | delete from the board |
+| `x` | delete from the board, with the tasks under it |
 | `X` | delete from the board in 10 minutes, without a question; `X` again keeps it |
 | `v` | select: `space` ticks tasks, then `x`, `m`, `p` or `h` deletes, moves, parks or hides all of them after one y / n, `esc` leaves |
 | `?` | help |
@@ -119,6 +119,7 @@ Then:
 - `hc inbox [<id>]` lists what a task heard from the tasks it drives
 - `hc handoff [init | path] [<id>]` prints a task's handoff file, `hc reset <id>` starts it again from there
 - `hc team [<id>]` shows the tasks a task drives, where each stands, and what waits on you among them
+- `hc rm <id>` deletes a task from the board, with the tasks under it; the Claude sessions stay
 - `hc pin <id>` pins a task to the top of the board, under those pinned before it, `hc unpin <id>` takes the pin off; `hc ls` marks its title with ▲, the web board tags it `pinned`, and its panel has a Pin to top button
 - `hc move <id> <state>` moves a session, the state as the board shows it, `Running` or `Needs me`, and `Parked` closes it
 - `hc adopt <id>` moves a session from your tmux into the board's
@@ -222,6 +223,7 @@ Then:
 - `hc new --parent <task> "<prompt>"` puts the new task under the one that drives it; `--parent self` is the task of the session hc runs in
 - `hc link <task> <parent>` puts a task already there under another one, `hc unlink <task>` takes it out
 - a task has one parent at most, and a parent can be any task; a loop is refused
+- deleting a task deletes the tasks under it at any depth, by `x`, `X`, `hc rm` or the web board; `x` and the web board say first how many go with it
 - the board, `hc ls` and the web list draw the tree in the TASK column: a parent says how many tasks it drives, `▾ 2`, and each one hangs under it, after the parent's sub-agents, on a `├─` or `└─` branch
 - each tree takes a color of its own, picked from the task at its top, on the board and on the web board
 - a card of the web board names its parent with a `↳` tag, and a parent card says how many tasks it drives with a `▾` tag, in the color of their tree

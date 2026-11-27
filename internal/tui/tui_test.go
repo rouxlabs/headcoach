@@ -2133,6 +2133,35 @@ func TestBoardNestsChildTasks(t *testing.T) {
 	}
 }
 
+// x on a parent says how many tasks go with it. A batch deletes the ticked tasks under a ticked one
+// first: the parent takes them along, so their own delete would find nothing.
+func TestDeleteNamesTheTasksUnder(t *testing.T) {
+	d := newDaemon(t)
+	boss, kid, gkid := task("boss0001", "running", 9), task("kid00001", "running", 5), task("gkid0001", "running", 3)
+	kid.Parent, gkid.Parent = boss.ID, kid.ID
+	m := loaded(t, d, boss, kid, gkid, task("lone0001", "review", 1))
+	if want := []string{"boss0001", "kid00001", "gkid0001", "lone0001"}; !reflect.DeepEqual(m.keys, want) {
+		t.Fatalf("keys = %v", m.keys)
+	}
+	m, _ = press(t, m, "x")
+	if m.noteText != "Delete boss0001 title boss0001 with 2 tasks under it?  y / n" {
+		t.Errorf("x on the parent asked %q", m.noteText)
+	}
+	m, _ = press(t, m, "n", "down", "down", "x")
+	if m.noteText != "Delete gkid0001 title gkid0001?  y / n" {
+		t.Errorf("x on a task with none under it asked %q", m.noteText)
+	}
+	m, _ = press(t, m, "n", "v", " ", "up", "up", " ", "x")
+	if m.noteText != "Delete 2 tasks with 1 more task under them? 2 running.  y / n" {
+		t.Fatalf("the batch asked %q", m.noteText)
+	}
+	m, cmd := press(t, m, "y")
+	m = run(t, m, cmd)
+	if want := []string{"DELETE /api/tasks/gkid0001", "DELETE /api/tasks/boss0001"}; !slices.Equal(d.calls, want) || m.notice != "2 tasks deleted" {
+		t.Errorf("the batch sent %v, said %q", d.calls, m.notice)
+	}
+}
+
 // w opens the coordinator view of the task under the cursor, or of the task driving it.
 func TestTeamView(t *testing.T) {
 	d := newDaemon(t)

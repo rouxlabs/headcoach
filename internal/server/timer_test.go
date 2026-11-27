@@ -120,8 +120,12 @@ func TestADeleteIsSetCancelledAndDone(t *testing.T) {
 	}
 	eq(t, f.task(id).DeleteAt, float64(0))
 
-	// Not yet due: the task stays. Due: it goes with its handoff, the other one stays.
+	// Not yet due: the task stays. Due: it goes with its handoff and the tasks under it, the other one
+	// stays. A task under it due too is gone by its turn.
 	f.ok(f.patch(path, obj{"delete_in": 60}))
+	kid := f.newTask(obj{"parent": id}).str("id")
+	f.ok(f.patch("/api/tasks/"+kid, obj{"delete_in": 60}))
+	f.newTask(obj{"parent": kid})
 	if err := os.MkdirAll(filepath.Dir(f.cfg.HandoffPath(id)), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +135,7 @@ func TestADeleteIsSetCancelledAndDone(t *testing.T) {
 	if err := f.srv.Expire(time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	eq(t, f.count("tasks"), 2)
+	eq(t, f.count("tasks"), 4)
 	if err := f.srv.Expire(time.Now().Add(2 * time.Minute)); err != nil {
 		t.Fatal(err)
 	}

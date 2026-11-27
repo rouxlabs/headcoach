@@ -137,7 +137,7 @@ func init() {
 		{name: "adopt", args: task, help: "move a session from your tmux into the board's own tmux", min: 1, max: 1, run: cmdAdopt},
 		{name: "screen", args: task, help: "print what a task's terminal is showing", min: 1, max: 1, run: cmdScreen},
 		{name: "keys", args: task + " <key>...", help: "press keys in a task's terminal to answer a dialog, e.g. Down Enter", min: 2, max: -1, run: cmdKeys},
-		{name: "rm", args: task, help: "delete a task from the board (the Claude session is kept)", min: 1, max: 1, run: cmdRm},
+		{name: "rm", args: task, help: "delete a task and the tasks under it from the board (the Claude sessions are kept)", min: 1, max: 1, run: cmdRm},
 		{name: "schedule", args: "[ls | add <prompt>... | run|pause|resume|rm <schedule> | timer <schedule> <duration|off> | model|effort <schedule> <value|default>]", max: -1, run: cmdSchedule,
 			help: "tasks that start themselves at a time of day, or on a cron line", flags: []flag{
 				{name: "at", value: true, help: "add: time of day, HH:MM"},
@@ -915,12 +915,17 @@ func cmdKeys(e *env, p parsed) error {
 
 func cmdRm(e *env, p parsed) error {
 	var out struct {
-		Deleted string `json:"deleted"`
+		Deleted  string   `json:"deleted"`
+		Children []string `json:"children"`
 	}
 	if err := e.client.Call("DELETE", "/api/tasks/"+p.args[0], nil, &out); err != nil {
 		return err
 	}
-	e.printf("deleted %s\n", board.Short(out.Deleted))
+	e.printf("deleted %s", board.Short(out.Deleted))
+	if n := len(out.Children); n > 0 {
+		e.printf(" with %s under it", format.Counted(n, "task"))
+	}
+	e.printf("\n")
 	return nil
 }
 

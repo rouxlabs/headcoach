@@ -539,8 +539,28 @@ func (s *Store) DeleteTaskAt(id string, at float64) error {
 	return err
 }
 
-// DeleteTask removes a task with its history and child rows. Its sessions stay, unlinked, and so do
-// the tasks it drove, at the top of the board.
+// Descendants returns the ids of the tasks under a task at any depth: those it drives, those they
+// drive, and so on. Empty when it drives none.
+func (s *Store) Descendants(id string) ([]string, error) {
+	rows, err := s.Query("WITH RECURSIVE under(id) AS (SELECT ?1 UNION SELECT tasks.id FROM tasks JOIN under ON tasks.parent = under.id)"+
+		" SELECT id FROM under WHERE id != ?1", id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var kid string
+		if err := rows.Scan(&kid); err != nil {
+			return nil, err
+		}
+		out = append(out, kid)
+	}
+	return out, rows.Err()
+}
+
+// DeleteTask removes one task with its history and child rows. Its sessions stay, unlinked, and the
+// tasks it drove go to the top of the board: the server deletes them first, see Descendants.
 func (s *Store) DeleteTask(id string) error {
 	for _, stmt := range []string{
 		"DELETE FROM history WHERE task_id = ?",

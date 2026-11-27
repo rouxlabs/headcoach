@@ -1325,6 +1325,9 @@ func (m *model) planBatch(key, state string) (title, question string, cmd tea.Cm
 	if key == "m" {
 		question += " to " + store.StateNames[state]
 	}
+	if key == "x" {
+		question += m.deleteOrder(ids)
+	}
 	question += "?"
 	if running > 0 && key != "m" {
 		question += fmt.Sprintf(" %d running.", running)
@@ -1588,8 +1591,11 @@ func (m model) boardKey(key string) (tea.Model, tea.Cmd) {
 			return doneMsg{notice: t.Short + " unpinned"}
 		}
 	case "x":
-		id := t.ID
-		m.note("Delete", "Delete "+t.Short+" "+board.Clip(t.Title, 50)+"?  y / n", func() tea.Cmd {
+		id, question := t.ID, "Delete "+t.Short+" "+board.Clip(t.Title, 50)
+		if n := len(m.under(t.ID)); n > 0 {
+			question += " with " + format.Counted(n, "task") + " under it"
+		}
+		m.note("Delete", question+"?  y / n", func() tea.Cmd {
 			c := m.client
 			return func() tea.Msg { return doneMsg{err: c.Call("DELETE", "/api/tasks/"+id, nil, nil)} }
 		})

@@ -60,7 +60,8 @@ func (s *Server) Expire(now time.Time) error {
 		return err
 	}
 	for _, task := range doomed {
-		if err := s.removeTask(task.ID); err != nil {
+		// A task under one deleted before it is gone already: deleting it again does nothing.
+		if _, err := s.removeTask(task.ID); err != nil {
 			return err
 		}
 	}

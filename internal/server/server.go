@@ -1372,13 +1372,27 @@ func (s *Server) deleteTask(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{"deleted": task.ID}, s.removeTask(task.ID)
+	children, err := s.removeTask(task.ID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"deleted": task.ID, "children": children}, nil
 }
 
-// removeTask deletes a task, and its handoff with it.
-func (s *Server) removeTask(id string) error {
-	_ = os.Remove(s.cfg.HandoffPath(id)) // there may be none
-	return s.st.DeleteTask(id)
+// removeTask deletes a task with the tasks under it at any depth, and their handoffs with them. It
+// returns the ids of the tasks under it.
+func (s *Server) removeTask(id string) ([]string, error) {
+	under, err := s.st.Descendants(id)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range append(under, id) {
+		_ = os.Remove(s.cfg.HandoffPath(id)) // there may be none
+		if err := s.st.DeleteTask(id); err != nil {
+			return nil, err
+		}
+	}
+	return under, nil
 }
 
 func (s *Server) startTask(r *http.Request) (any, error) {
