@@ -439,9 +439,13 @@ func TestReplyToAClosedTaskResumesItInANewWindow(t *testing.T) {
 func TestFocus(t *testing.T) {
 	f := newFixture(t)
 	id := f.live()
+	eq(t, f.task(id).SeenAt, 0.0)
 	f.ok(f.post("/api/tasks/"+id+"/focus", nil))
 	eq(t, f.tmux.focused, []string{"%1"})
 	eq(t, len(f.tmux.windows), 0)
+	if f.task(id).SeenAt == 0 {
+		t.Error("a task you went into is not seen")
+	}
 	// A closed task gets a window first.
 	f.hook("SessionEnd", "s1", nil)
 	delete(f.tmux.known, "%1")
@@ -565,6 +569,23 @@ func TestPinATaskToTheTop(t *testing.T) {
 	eq(t, f.ok(f.patch("/api/tasks/t-pin", obj{"pinned": false})).data["pinned"], false)
 	eq(t, f.task("t-pin").PinnedAt, 0.0)
 	eq(t, f.task("t-pin").UpdatedAt, before)
+}
+
+func TestSeeATask(t *testing.T) {
+	f := newFixture(t)
+	f.st.CreateTask(store.Task{ID: "t-seen", Title: "seen"}, "you")
+	f.st.Exec("UPDATE tasks SET updated_at = updated_at - 600")
+	before := f.task("t-seen").UpdatedAt
+
+	f.wantError(f.patch("/api/tasks/t-seen", obj{"seen": false}), 400)
+	eq(t, f.task("t-seen").SeenAt, 0.0)
+
+	// Going into a task is not activity: the task keeps how long it has been idle.
+	got := f.ok(f.patch("/api/tasks/t-seen", obj{"seen": true})).data
+	if got["seen_at"].(float64) == 0 {
+		t.Errorf("not seen: %v", got["seen_at"])
+	}
+	eq(t, f.task("t-seen").UpdatedAt, before)
 }
 
 func TestReconcileClosesSessionsWhosePaneDisappeared(t *testing.T) {

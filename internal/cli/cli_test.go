@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -22,8 +23,10 @@ import (
 	"github.com/rouxlabs/headcoach/internal/herdr"
 	"github.com/rouxlabs/headcoach/internal/install"
 	"github.com/rouxlabs/headcoach/internal/server"
+	"github.com/rouxlabs/headcoach/internal/sh"
 	"github.com/rouxlabs/headcoach/internal/store"
 	"github.com/rouxlabs/headcoach/internal/tmux"
+	"github.com/rouxlabs/headcoach/internal/tui"
 )
 
 // fakeTmux is a tmux where every pane it was told about exists, and that remembers what was typed.
@@ -660,6 +663,129 @@ func TestAttach(t *testing.T) {
 	if want := []string{"/bin/sh", "-c", "claude-team --session-id mine0001", "TMUX=/tmp/outer,1,0", "HC_TASK=mine0001"}; !reflect.DeepEqual(ran[len(ran)-1], want) {
 		t.Errorf("attach ran %v, want %v", ran[len(ran)-1], want)
 	}
+}
+
+func TestSwitch(t *testing.T) {
+	f := newFixture(t)
+	var ran [][]string
+	var replaced []string
+	var current string
+	var pick *api.Task
+	var told []string
+	oldAttach, oldSwitch, oldReplace, oldTell := runAttach, runSwitch, replaceClient, tellClient
+	defer func() { runAttach, runSwitch, replaceClient, tellClient = oldAttach, oldSwitch, oldReplace, oldTell }()
+	tellClient = func(client, text string) error {
+		told = append(told, client+" "+text)
+		return nil
+	}
+	runAttach = func(argv, environ []string) error { ran = append(ran, argv); return nil }
+	runSwitch = func(c *client.Client, theme, from string) (*api.Task, error) { current = from; return pick, nil }
+	replaceClient = func(client, command string) error {
+		replaced = append(replaced, client+" "+command)
+		return nil
+	}
+
+	short := strings.Fields(f.ok("new", "-C", f.tmp, "do it"))[0]
+	task, err := client.New(f.url).Task(short)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Closed without a pick: nothing happens.
+	t.Setenv("HC_TASK", "from0001")
+	f.ok("switch")
+	if current != "from0001" || len(ran)+len(replaced) != 0 {
+		t.Errorf("a closed switcher, from %q: ran %v, replaced %v", current, ran, replaced)
+	}
+
+	// From a terminal: it enters the task picked, as hc attach does, and notes it as seen.
+	pick = &task
+	f.ok("switch")
+	if want := tmux.AttachCommand("%101", f.cfg.TmuxSocket()); len(ran) != 1 || !reflect.DeepEqual(ran[0], want) {
+		t.Errorf("switch ran %v, want %v", ran, want)
+	}
+	if seen, _ := f.st.Task(task.ID); seen.SeenAt == 0 {
+		t.Error("the task entered is not seen")
+	}
+
+	// In a popup over a session of the board's tmux: the terminal the key came from moves to the task's
+	// session, in the same tmux.
+	var switched []string
+	oldSwitchClient := switchClient
+	defer func() { switchClient = oldSwitchClient }()
+	switchClient = func(client, pane string) error {
+		switched = append(switched, client+" "+pane)
+		return nil
+	}
+	t.Setenv("HC_CLIENT", "/dev/ttys042")
+	f.ok("switch", "--popup")
+	if want := []string{"/dev/ttys042 %101"}; len(ran)+len(replaced) != 1 || !reflect.DeepEqual(switched, want) {
+		t.Errorf("switch --popup switched %q, want %q (ran %v, replaced %q)", switched, want, ran, replaced)
+	}
+
+	// Ctrl-^ from the only task entered: there is none to go back to, and it says so on that terminal.
+	t.Setenv("HC_TASK", task.ID)
+	f.ok("switch", "--last")
+	if want := []string{"/dev/ttys042 hc: no task entered before this one"}; len(switched) != 1 || !reflect.DeepEqual(told, want) {
+		t.Errorf("switch --last with no other task: told %q, switched %q", told, switched)
+	}
+
+	// Once you entered another, it goes straight back to the task entered before, without the switcher,
+	// and notes it as entered: pressed again, it comes back.
+	other := strings.Fields(f.ok("new", "-C", f.tmp, "do that"))[0]
+	otherTask, err := client.New(f.url).Task(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.SeeTask(otherTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HC_TASK", otherTask.ID)
+	current = ""
+	f.ok("switch", "--last")
+	if want := "/dev/ttys042 %101"; len(switched) != 2 || switched[1] != want || current != "" {
+		t.Errorf("switch --last switched %q, want %q", switched, want)
+	}
+	board, err := client.New(f.url).Board()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back := tui.Previous(board.Tasks, task.ID); back == nil || back.ID != otherTask.ID {
+		t.Errorf("after the switch, Ctrl-^ would go to %v, want %s", back, otherTask.ID)
+	}
+
+	// A task with no session in the board's tmux: a new attach takes the terminal over, drawn on the
+	// terminal itself.
+	delete(f.tmux.panes, "%101")
+	f.ok("switch", "--last")
+	exe, _ := os.Executable()
+	if want := []string{"/dev/ttys042 /bin/sh -c " + sh.Quote("exec "+sh.Quote(exe)+" attach "+task.ID+" 1<>/dev/tty")}; len(switched) != 2 || !reflect.DeepEqual(replaced, want) {
+		t.Errorf("switch --last to a task not live replaced the client with %q, want %q (switched %q)", replaced, want, switched)
+	}
+
+	// Without the terminal the key came from, it would guess one, maybe another terminal: it refuses.
+	t.Setenv("HC_CLIENT", "")
+	for _, flag := range []string{"--popup", "--last"} {
+		if code, _, stderr := f.hc("switch", flag); code == 0 || !strings.Contains(stderr, "Ctrl-\\") || len(replaced)+len(switched) != 3 {
+			t.Errorf("switch %s without HC_CLIENT: exit %d, %q, replaced %q", flag, code, stderr, replaced)
+		}
+	}
+}
+
+// Ctrl-\ pressed again while a switch hands the terminal over is dropped, not a crash of hc attach.
+func TestAttachDropsAQuit(t *testing.T) {
+	f := newFixture(t)
+	old := runAttach
+	defer func() { runAttach = old }()
+	runAttach = func(argv, environ []string) error {
+		if err := syscall.Kill(os.Getpid(), syscall.SIGQUIT); err != nil {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond) // a quit not caught dumps the goroutines and ends the test binary
+		return nil
+	}
+	short := strings.Fields(f.ok("new", "-C", f.tmp, "do it"))[0]
+	f.ok("attach", short)
 }
 
 // herdrAgents is a Herdr whose every server runs these agents, by pane.

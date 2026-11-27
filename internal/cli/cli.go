@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"github.com/rouxlabs/headcoach/internal/herdr"
 	"github.com/rouxlabs/headcoach/internal/install"
 	"github.com/rouxlabs/headcoach/internal/limits"
+	"github.com/rouxlabs/headcoach/internal/sh"
 	"github.com/rouxlabs/headcoach/internal/store"
 	"github.com/rouxlabs/headcoach/internal/tmux"
 	"github.com/rouxlabs/headcoach/internal/transcript"
@@ -89,6 +91,14 @@ var (
 		_ = exec.Command(opener, url).Start() // no browser is not worth an error: the address is printed
 	}
 	runTUI = tui.Run
+	// runSwitch shows the switcher of recent tasks, and returns the task picked: nil when it was closed.
+	runSwitch = tui.Switch
+	// replaceClient hands a tmux client over to a command.
+	replaceClient = tmux.ReplaceClient
+	// switchClient moves a tmux client to the session of a pane.
+	switchClient = tmux.SwitchClient
+	// tellClient shows a line at the bottom of a tmux client.
+	tellClient = tmux.Tell
 )
 
 var commands []command
@@ -128,6 +138,10 @@ func init() {
 		{name: "review", help: "list the tasks in Review, the one waiting longest first, with their change", run: cmdReview, flags: []flag{jsonFlag}},
 		{name: "start", args: task, help: "start or resume a task in a new tmux window", min: 1, max: 1, run: cmdStart},
 		{name: "attach", args: task, help: "enter a task's session from this terminal; Ctrl-] comes back", min: 1, max: 1, run: cmdAttach},
+		{name: "switch", help: "pick one of the last 10 tasks you entered, the latest first, and enter it; Ctrl-\\ opens it inside a session", run: cmdSwitch, flags: []flag{
+			{name: "popup", help: "in a tmux popup: the terminal around it enters the task"},
+			{name: "last", help: "from a tmux key: the terminal it came from goes straight back to the last task, as Ctrl-^ does"},
+		}},
 		{name: "ask", args: task + " [question]...", help: "ask about a task without touching its session; no question means a summary", min: 1, max: -1, run: cmdAsk},
 		{name: "reply", args: task + " <text>...", help: "send a message to a task's session, or the answer to its question; from a session, it names its sender", min: 2, max: -1, run: cmdReply},
 		{name: "timer", args: task + " <duration|off>", help: "close a task once this long has passed from now, e.g. 10m; off removes its timer", min: 2, max: 2, run: cmdTimer},
@@ -841,8 +855,79 @@ func cmdReply(e *env, p parsed) error {
 	return nil
 }
 
-func cmdAttach(e *env, p parsed) error {
-	t, err := e.client.Task(p.args[0])
+func cmdAttach(e *env, p parsed) error { return enter(e, p.args[0]) }
+
+// cmdSwitch opens the switcher of recent tasks, then enters the task picked. In a popup over a session
+// of the board's tmux, the terminal the key came from, named in HC_CLIENT, leaves that session for the
+// task. With --last, that terminal goes straight back to the task entered before, without the switcher.
+func cmdSwitch(e *env, p parsed) error {
+	client := os.Getenv("HC_CLIENT")
+	popup, last := p.has("popup"), p.has("last")
+	if (popup || last) && client == "" {
+		return errors.New("hc switch --popup and --last run from Ctrl-\\ and Ctrl-^ inside a session of the board's tmux; use hc switch")
+	}
+	var t *api.Task
+	if last {
+		board, err := e.client.Board()
+		if err == nil {
+			if t = tui.Previous(board.Tasks, os.Getenv("HC_TASK")); t == nil {
+				err = errors.New("no task entered before this one")
+			}
+		}
+		if err != nil {
+			// Said where the key was pressed: tmux would show the error in a pane of its own.
+			if tellClient(client, "hc: "+err.Error()) != nil {
+				return err
+			}
+			return nil
+		}
+	} else {
+		cfg, err := config.Load("")
+		if err != nil {
+			return err
+		}
+		if t, err = runSwitch(e.client, cfg.Theme, os.Getenv("HC_TASK")); err != nil || t == nil {
+			return err
+		}
+		if !popup {
+			return enter(e, t.ID)
+		}
+	}
+	// In the board's tmux, as the session the key came from: the terminal moves to the task's session,
+	// as tmux moves between sessions. Anywhere else, a new attach takes the terminal over, and the one
+	// before waits under it until Ctrl-].
+	fresh, err := e.client.Task(t.ID)
+	if err != nil {
+		return err
+	}
+	if fresh.Live && fresh.Tmux == "hc" && fresh.Pane != "" {
+		if _, err := e.client.Enter(fresh); err != nil { // notes it as entered
+			return err
+		}
+		return switchClient(client, fresh.Pane)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	// It writes to the terminal, not to what tmux wrote to: the board reads that through a pipe, which
+	// holds a screen back. Read and write, so that what asks the terminal a question reads its answer,
+	// rather than leave it typed into the session. /bin/sh reads it whatever your shell.
+	return replaceClient(client, "/bin/sh -c "+sh.Quote("exec "+sh.Quote(exe)+" attach "+t.ID+" 1<>/dev/tty"))
+}
+
+// enter takes this terminal into a task's session, wherever it runs, starting it when needed.
+func enter(e *env, id string) error {
+	// Ctrl-\ pressed again while a switch hands the terminal over is no reason to die: it is caught and
+	// dropped. Caught, not ignored, so that what runs next still gets it.
+	quits := make(chan os.Signal, 1)
+	signal.Notify(quits, syscall.SIGQUIT)
+	defer func() { signal.Stop(quits); close(quits) }()
+	go func() {
+		for range quits {
+		}
+	}()
+	t, err := e.client.Task(id)
 	if err != nil {
 		return err
 	}

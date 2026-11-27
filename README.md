@@ -31,6 +31,7 @@ The same board in the browser:
 - a session or a sub-agent that loads a persona skill, such as `/reviewer`, shows it in the PERSONA column
 - the top of the board shows how much of your 5 hour and 7 day limits is used, see [Limits and cost](#limits-and-cost)
 - you enter a session with one key, leave it with another, and it keeps running
+- you go back to a session you were in lately with `tab` on the board, or `Ctrl-\` from inside a session of the board's tmux, and straight to the last one with `Ctrl-^`, the way `Ctrl-Tab` goes back to a browser tab
 - you ask a question about a session without interrupting it
 - you pin a task to the top of the board, with its sub-agents and the tasks it drives, whatever the order
 - a task can carry a timer, and closes itself when it runs out
@@ -74,6 +75,7 @@ Then:
 |---|---|
 | `j` `k`, arrows | move the cursor; `g` `G` go to the top or the bottom, `pgup` `pgdn` move a page |
 | `a` | enter the session, `Ctrl-]` comes back; on a sub-agent, its main session |
+| `tab` | recent tasks: the last 10 you entered, the latest first; `tab` moves, `enter`, `a` or the number enters one, see [Recent tasks](#recent-tasks) |
 | `enter` | open the session: details, history, log |
 | `q` | ask about the session without touching it |
 | `r` | reply to the session; on a question, the answer goes in its "Type something" option |
@@ -107,6 +109,7 @@ Then:
 - `hc ls --sort cost` puts the most expensive session first, `--sort idle` the most recently active one
 - `hc new -s "<prompt>"` starts a session in the current directory
 - `hc attach <id>` enters a session
+- `hc switch` lists the tasks you entered, the latest first, and enters the one you pick
 - `hc ask <id> ["<question>"]` answers a question about a session, or summarises it
 - `hc reply <id> "<text>"` sends a message to a session; from another session, it says who sent it, see [Coordinators](#coordinators)
 - on a question, `hc reply` types the answer in its "Type something" option and submits it; a dialog without one refuses it
@@ -157,6 +160,18 @@ Then:
 - parking it, or its timer running out, leaves its Herdr pane open
 - `hc reset` and a coordinator's news reach only a session in tmux
 - once Herdr no longer runs it in a pane, or `herdr` is not installed, it counts as closed, and a reply resumes it in tmux
+
+## Recent tasks
+
+- the board notes when you enter a task: `a`, `hc attach`, the phone, or Go to terminal on the web board
+- `tab` on the board opens the last 10 tasks you entered, the latest first, in a box over the board
+- `tab`, `j` or the arrows move, `enter`, `a` or the number of the row, `1` to `9` then `0`, enters one, `esc` closes
+- inside a session of the board's tmux, `Ctrl-\` opens the same list in a box over the session, the cursor on the task you were in before; it needs tmux 3.2 or later
+- `Ctrl-^`, `Ctrl-6` in most terminals, goes straight back to the task you were in before, without the list; pressed again, it comes back
+- `Ctrl-Tab` does the same as `Ctrl-^`, in a terminal that tells it from `Tab`
+- either leaves the session for that one, wherever it runs; `Ctrl-]` still comes back to where you came from
+- `hc switch` opens the list from any terminal, and enters the task there
+- a done task you hid is left out
 
 ## Schedules
 
@@ -277,6 +292,7 @@ Then:
 - an app opens `wss://<board>/api/tasks/<id>/attach?cols=<n>&rows=<n>` with its device cookie
 - binary frames carry the keys to tmux and the screen back; a text frame `{"type":"resize","cols":<n>,"rows":<n>}` resizes it
 - byte `0x1d`, Ctrl-], leaves the session, and the socket closes with `Detached`
+- byte `0x1c`, Ctrl-\, opens the switcher of [recent tasks](#recent-tasks) over the session: a pick moves the stream to that task, or ends it when the task runs in your own tmux
 - the stream carries no hint about Ctrl-], unlike `hc attach`: an app shows its own way out
 - the daemon pings an attached app every 15 seconds: one that stops answering, or is unpaired with `hc devices rm`, is hung up
 - on Android, Chrome's "Add to Home screen" installs the board as an app

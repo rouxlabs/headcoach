@@ -209,3 +209,34 @@ func TestPinTask(t *testing.T) {
 		t.Error("unpinning the first changed the pins")
 	}
 }
+
+func TestSeeTask(t *testing.T) {
+	st, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.CreateTask(Task{ID: "seen0001", Title: "seen"}, "you"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Exec("UPDATE tasks SET updated_at = 1 WHERE id = 'seen0001'"); err != nil {
+		t.Fatal(err)
+	}
+	if task, _ := st.Task("seen0001"); task.SeenAt != 0 {
+		t.Errorf("a new task was seen at %v", task.SeenAt)
+	}
+	before := Now()
+	if err := st.SeeTask("seen0001"); err != nil {
+		t.Fatal(err)
+	}
+	task, err := st.Task("seen0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.SeenAt < before {
+		t.Errorf("seen at %v, before %v", task.SeenAt, before)
+	}
+	if task.UpdatedAt != 1 {
+		t.Errorf("seeing a task counted as activity: updated_at %v", task.UpdatedAt)
+	}
+}

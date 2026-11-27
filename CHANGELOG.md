@@ -9,6 +9,7 @@ All notable changes to headcoach. The format follows [Keep a Changelog](https://
 - the web board marks where a live session runs, `hc` for the board's tmux, `tmux` for yours or `herdr`, on its card, its list row and its panel
 - the web board shows the profile of a task as a pill of its own and in the task panel, and its repo in bold
 - the web board takes the themes of the terminal board: it starts with the one `theme` sets, and its Theme menu picks another for that browser
+- `tab` on the board, or `Ctrl-\` inside a session of the board's tmux, lists the last 10 tasks you entered, the latest first, and `enter`, `a` or the number of one goes back to it; `Ctrl-^` inside a session goes straight back to the last one, the way `Ctrl-Tab` goes back to a browser tab; `hc switch` lists them from any terminal
 
 ### Changed
 

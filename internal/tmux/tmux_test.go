@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 func TestAttachCommandShowsTheWayOutAndAttachQuietDoesNot(t *testing.T) {
@@ -199,5 +202,169 @@ func TestNewSessionCleansAServerStartedWithTheEnvironmentOfItsStarter(t *testing
 	}
 	if strings.Contains(global, "HERDR_") || strings.Contains(global, "CLAUDECODE") {
 		t.Errorf("the server still has them:\n%s", global)
+	}
+}
+
+// The board's own server binds the switcher of recent tasks, runs the hc it is given, and a server
+// already running takes a new config at the next session.
+func TestPrivateServerBindsTheSwitcher(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	dir, err := os.MkdirTemp("/tmp", "hc") // a socket path has a short limit
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket, conf := filepath.Join(dir, "s"), filepath.Join(dir, "tmux.conf")
+	defer run(socket, "", "kill-server")
+	version, _ := run("", "", "-V")
+	switcher := popups(version)
+	c := &Client{}
+	// The second hc is one tmux cannot quote: the first one goes, the PATH finds hc.
+	for _, bin := range []string{"/opt/hc one/hc", "/opt/hc two/hc", "/opt/it's/hc"} {
+		if _, err := c.NewSession(Window{Name: "t", Command: "sleep 30", Socket: socket, Conf: conf, Bin: bin}); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := run(socket, "", "show-environment", "-g", "HC_BIN")
+		want := "HC_BIN=" + bin
+		if !switcher || strings.Contains(bin, "'") {
+			want = ""
+		}
+		if got != want && !(want == "" && strings.HasPrefix(got, "-HC_BIN")) {
+			t.Errorf("HC_BIN = %q, want %q", got, want)
+		}
+	}
+	keys, err := run(socket, "", "list-keys", "-T", "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(keys, "bind-key -T root C-] ") {
+		t.Errorf("Ctrl-] does not leave: %s", keys)
+	}
+	if !switcher {
+		t.Skipf("%s has no popup for the switcher", version)
+	}
+	// Ctrl-\ opens the switcher in a popup; Ctrl-^ and Ctrl-Tab go straight back to the last task.
+	for key, pieces := range map[string][]string{
+		`C-\\`:  {"set-environment -F HC_CLIENT", "display-popup -EE", "/bin/sh -c", "switch --popup"},
+		"C-^":   {"set-environment -F HC_CLIENT", "run-shell -b", "switch --last"},
+		"C-Tab": {"set-environment -F HC_CLIENT", "run-shell -b", "switch --last"},
+	} {
+		line := ""
+		for _, l := range strings.Split(keys, "\n") {
+			if strings.HasPrefix(l, "bind-key -T root "+key+" ") {
+				line = l
+			}
+		}
+		for _, piece := range pieces {
+			if !strings.Contains(line, piece) {
+				t.Errorf("%s lacks %q: %q", key, piece, line)
+			}
+		}
+	}
+}
+
+func TestPrivateConfLeavesAPathTmuxCannotQuoteToThePath(t *testing.T) {
+	for _, bin := range []string{"", "/opt/it's/hc", "/opt/a\nb/hc"} {
+		if conf := privateConf(bin, true); strings.Contains(conf, "HC_BIN '") || !strings.Contains(conf, "switch --popup") ||
+			!strings.Contains(conf, "switch --last") {
+			t.Errorf("privateConf(%q) = %s", bin, conf)
+		}
+	}
+}
+
+// A tmux older than 3.2 has no popup for the switcher.
+func TestTheSwitcherNeedsTmux32(t *testing.T) {
+	for version, want := range map[string]bool{"tmux 3.6b": true, "tmux 3.2a": true, "tmux next-3.7": true,
+		"tmux master": true, "tmux 4.0": true, "tmux 3.10": true, "tmux 3.1c": false, "tmux 3.0a": false, "tmux 2.9": false} {
+		if got := popups(version); got != want {
+			t.Errorf("popups(%q) = %v", version, got)
+		}
+	}
+	if conf := privateConf("/opt/hc", false); conf != privateBase {
+		t.Errorf("without popups, the config is:\n%s", conf)
+	}
+}
+
+// The switcher moves or hands over the terminal its key came from, not another one attached to the same
+// server.
+func TestReplaceClientHandsOverTheClientNamed(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	dir, err := os.MkdirTemp("/tmp", "hc") // a socket path has a short limit
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "s")
+	defer run(socket, "", "kill-server")
+	for _, name := range []string{"one", "two", "three"} {
+		if _, err := run(socket, "", "new-session", "-d", "-s", name, "sleep 30"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	terminals := map[string]*os.File{}
+	for _, name := range []string{"one", "two"} {
+		cmd := exec.Command("tmux", "-S", socket, "attach-session", "-t", name)
+		cmd.Env = append(AttachEnv(), "TERM=xterm-256color")
+		term, err := pty.Start(cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer term.Close()
+		go io.Copy(io.Discard, term) // a terminal nobody reads stalls tmux
+		terminals[name] = term
+		defer cmd.Process.Kill()
+	}
+	clients := func() map[string]string { // session: client
+		out, _ := run(socket, "", "list-clients", "-F", "#{session_name} #{client_name}")
+		found := map[string]string{}
+		for _, line := range strings.Split(out, "\n") {
+			if fields := strings.Fields(line); len(fields) == 2 {
+				found[fields[0]] = fields[1]
+			}
+		}
+		return found
+	}
+	var attached map[string]string
+	for i := 0; i < 100 && len(attached) < 2; i++ {
+		time.Sleep(20 * time.Millisecond)
+		attached = clients()
+	}
+	if len(attached) != 2 {
+		t.Fatalf("attached clients: %v", attached)
+	}
+	// Two is the most recently active session: a guess would hand it over.
+	if _, err := run(socket, "", "send-keys", "-t", "two", "x"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMUX", socket+",1,0")
+	pane, err := run(socket, "", "display-message", "-p", "-t", "three", "#{pane_id}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SwitchClient(attached["one"], strings.TrimSpace(pane)); err != nil {
+		t.Fatal(err)
+	}
+	if now := clients(); len(now) != 2 || now["three"] != attached["one"] || now["two"] != attached["two"] {
+		t.Errorf("after the switch, clients: %v", now)
+	}
+	out := filepath.Join(dir, "out")
+	if err := ReplaceClient(attached["one"], "echo replaced > "+out); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		if got, _ := os.ReadFile(out); string(got) == "replaced\n" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got, _ := os.ReadFile(out); string(got) != "replaced\n" {
+		t.Errorf("the command did not run: %q", got)
+	}
+	if left := clients(); len(left) != 1 || left["two"] != attached["two"] {
+		t.Errorf("clients left: %v, want two's %s", left, attached["two"])
 	}
 }

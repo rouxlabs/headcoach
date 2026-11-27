@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     parent     TEXT NOT NULL DEFAULT '',
     pinned_at  REAL NOT NULL DEFAULT 0,
     delete_at  REAL NOT NULL DEFAULT 0,
+    seen_at    REAL NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -216,7 +217,9 @@ type Task struct {
 	// PinnedAt is when you pinned the task to the top of the board, as a Unix time. Zero: not pinned.
 	PinnedAt float64 `json:"pinned_at"`
 	// DeleteAt is when the daemon deletes the task, as a Unix time. Zero: it stays.
-	DeleteAt  float64 `json:"delete_at"`
+	DeleteAt float64 `json:"delete_at"`
+	// SeenAt is when you last went into the task's session, as a Unix time. Zero: never.
+	SeenAt    float64 `json:"seen_at"`
 	CreatedAt float64 `json:"created_at"`
 	UpdatedAt float64 `json:"updated_at"`
 }
@@ -286,6 +289,7 @@ func Open(path string) (*Store, error) {
 		{"tasks", "parent", "TEXT NOT NULL DEFAULT ''"},
 		{"tasks", "pinned_at", "REAL NOT NULL DEFAULT 0"},
 		{"tasks", "delete_at", "REAL NOT NULL DEFAULT 0"},
+		{"tasks", "seen_at", "REAL NOT NULL DEFAULT 0"},
 		{"schedules", "timer", "INTEGER NOT NULL DEFAULT 0"},
 		{"schedules", "model", "TEXT NOT NULL DEFAULT ''"},
 		{"schedules", "effort", "TEXT NOT NULL DEFAULT ''"},
@@ -354,7 +358,8 @@ func (s *Store) addColumn(table, column, decl string) error {
 // --- tasks ---------------------------------------------------------------------------
 
 const taskColumns = "id, title, prompt, state, cwd, repo, branch, profile, source, ask, ask_kind, last, remote," +
-	" persona, waiting, base, ends_at, model, effort, schedule, hidden, parent, pinned_at, delete_at, created_at, updated_at"
+	" persona, waiting, base, ends_at, model, effort, schedule, hidden, parent, pinned_at, delete_at, seen_at, created_at," +
+	" updated_at"
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -362,7 +367,7 @@ func scanTask(row scanner) (*Task, error) {
 	var t Task
 	err := row.Scan(&t.ID, &t.Title, &t.Prompt, &t.State, &t.Cwd, &t.Repo, &t.Branch, &t.Profile, &t.Source,
 		&t.Ask, &t.AskKind, &t.Last, &t.Remote, &t.Persona, &t.Waiting, &t.Base, &t.EndsAt, &t.Model, &t.Effort, &t.Schedule, &t.Hidden, &t.Parent, &t.PinnedAt, &t.DeleteAt,
-		&t.CreatedAt, &t.UpdatedAt)
+		&t.SeenAt, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -424,9 +429,9 @@ func (s *Store) CreateTask(t Task, by string) (*Task, error) {
 		t.Source = "manual"
 	}
 	_, err := s.Exec(
-		"INSERT INTO tasks ("+taskColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO tasks ("+taskColumns+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		t.ID, t.Title, t.Prompt, t.State, t.Cwd, t.Repo, t.Branch, t.Profile, t.Source, t.Ask, t.AskKind, t.Last,
-		t.Remote, t.Persona, t.Waiting, t.Base, t.EndsAt, t.Model, t.Effort, t.Schedule, false, t.Parent, 0, 0, now, now,
+		t.Remote, t.Persona, t.Waiting, t.Base, t.EndsAt, t.Model, t.Effort, t.Schedule, false, t.Parent, 0, 0, 0, now, now,
 	)
 	if err != nil {
 		return nil, err
@@ -529,6 +534,13 @@ func (s *Store) PinTask(id string, pinned bool) error {
 		return err
 	}
 	_, err := s.Exec("UPDATE tasks SET pinned_at = ? WHERE id = ? AND pinned_at = 0", Now(), id)
+	return err
+}
+
+// SeeTask notes that you went into a task's session just now. It leaves updated_at alone: looking at
+// a task is not activity of its own.
+func (s *Store) SeeTask(id string) error {
+	_, err := s.Exec("UPDATE tasks SET seen_at = ? WHERE id = ?", Now(), id)
 	return err
 }
 
