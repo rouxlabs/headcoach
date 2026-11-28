@@ -4,6 +4,10 @@ All notable changes to headcoach. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+### Fixed
+
+- in a session of the board's tmux, the first turn of the mouse wheel up scrolls back 5 lines: it used to only enter copy mode, and the text moved from the second
+
 ## [1.3.0] - 2026-11-28
 
 Go back to a session you were in with one key: inside a session, `Ctrl-^` jumps to the last one and `Ctrl-\` lists the last ten, and `tab` lists them on the board. A `/clear` now starts a fresh task, deleting a task takes the tasks it drives along, and the web board shows where each session runs and takes the terminal board's themes.
