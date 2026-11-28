@@ -4,6 +4,10 @@ All notable changes to headcoach. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-28
+
+Go back to a session you were in with one key: inside a session, `Ctrl-^` jumps to the last one and `Ctrl-\` lists the last ten, and `tab` lists them on the board. A `/clear` now starts a fresh task, deleting a task takes the tasks it drives along, and the web board shows where each session runs and takes the terminal board's themes.
+
 ### Added
 
 - the web board marks where a live session runs, `hc` for the board's tmux, `tmux` for yours or `herdr`, on its card, its list row and its panel
@@ -88,7 +92,8 @@ The first public release of headcoach. `hc` puts every Claude Code session on on
 - `hc update`, or `u` on the board, installs the latest release, checked against its `SHA256SUMS`
 - four themes: `terminal`, `bright`, `nord` and `k9s`
 
-[Unreleased]: https://github.com/rouxlabs/headcoach/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/rouxlabs/headcoach/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/rouxlabs/headcoach/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/rouxlabs/headcoach/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/rouxlabs/headcoach/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/rouxlabs/headcoach/compare/v1.0.0...v1.1.0
