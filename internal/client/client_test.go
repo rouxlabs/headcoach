@@ -3,12 +3,16 @@ package client
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rouxlabs/headcoach/internal/api"
 )
 
 // A daemon too slow to answer is told apart from one that is not there: the slow one may have done
@@ -75,5 +79,32 @@ func TestPinAgainstAnOlderDaemon(t *testing.T) {
 	}
 	if _, err := New(old.URL).Pin("task0001", false); err != nil {
 		t.Errorf("unpin against an older daemon: %v", err)
+	}
+}
+
+// Entering a task notes it as seen, for the switcher of recent tasks; a daemon that refuses it does not
+// keep you out.
+func TestEnterSeesTheTask(t *testing.T) {
+	var calls []string
+	status := http.StatusOK
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		calls = append(calls, fmt.Sprintf("%s %s %v", r.Method, r.URL.Path, body))
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(map[string]string{"id": "task0001"})
+	}))
+	defer daemon.Close()
+	live := api.Task{Live: true, Attach: []string{"tmux", "attach"}}
+	live.ID = "task0001"
+	for _, code := range []int{http.StatusOK, http.StatusInternalServerError} {
+		calls, status = nil, code
+		attach, err := New(daemon.URL).Enter(live)
+		if err != nil || len(attach) != 2 {
+			t.Errorf("enter with the daemon answering %d: %v, %v", code, attach, err)
+		}
+		if want := []string{"PATCH /api/tasks/task0001 map[seen:true]"}; !slices.Equal(calls, want) {
+			t.Errorf("calls %q, want %q", calls, want)
+		}
 	}
 }

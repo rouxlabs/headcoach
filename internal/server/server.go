@@ -893,6 +893,7 @@ func (s *Server) openWindowBy(task *store.Task, prompt, by string) (string, erro
 	var pane string
 	if s.cfg.PrivateTmux {
 		window.Socket, window.Conf = s.cfg.TmuxSocket(), s.cfg.TmuxConf()
+		window.Bin, _ = os.Executable() // without it, the switcher key looks for hc on the PATH
 		pane, err = s.tmux.NewSession(window)
 	} else {
 		window.Session = s.cfg.TmuxSession
@@ -1267,6 +1268,10 @@ func (s *Server) patchTask(r *http.Request) (any, error) {
 	if _, ok := data["pinned"]; ok && !pin {
 		return nil, fail(400, "pinned is true or false")
 	}
+	seen, _ := data["seen"].(bool)
+	if _, ok := data["seen"]; ok && !seen {
+		return nil, fail(400, "seen is true")
+	}
 	// Checked before any change: a refused request changes nothing.
 	if state, ok := data["state"].(string); hidden && (ok && state != "done" || !ok && task.State != "done") {
 		return nil, fail(400, "Only a done task can be hidden")
@@ -1361,6 +1366,11 @@ func (s *Server) patchTask(r *http.Request) (any, error) {
 	}
 	if pin {
 		if err := s.st.PinTask(task.ID, pinned); err != nil {
+			return nil, err
+		}
+	}
+	if seen {
+		if err := s.st.SeeTask(task.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -1607,7 +1617,7 @@ func (s *Server) focus(r *http.Request) (any, error) {
 		if err := s.Herdr.Focus(sess.HerdrPane, sess.HerdrSocket); err != nil {
 			return nil, fail(502, "herdr could not switch to the session: %v", err)
 		}
-		return s.refreshed(task.ID)
+		return s.entered(task.ID)
 	}
 	if s.private(sess) {
 		return nil, fail(409, "This session runs in the board's own tmux. Enter it from a terminal with: hc attach %s",
@@ -1630,7 +1640,16 @@ func (s *Server) focus(r *http.Request) (any, error) {
 			return nil, fail(502, "tmux could not switch to the session: %v", err)
 		}
 	}
-	return s.refreshed(task.ID)
+	return s.entered(task.ID)
+}
+
+// entered notes that you went into a task's session, for the switcher of recent tasks, and answers with
+// the task.
+func (s *Server) entered(id string) (any, error) {
+	if err := s.st.SeeTask(id); err != nil {
+		return nil, err
+	}
+	return s.refreshed(id)
 }
 
 // adopt moves a task's session out of your tmux into the board's own: close it there, resume it here.

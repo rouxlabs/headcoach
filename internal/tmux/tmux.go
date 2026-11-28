@@ -13,7 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,12 +24,12 @@ import (
 const (
 	detachKey = "C-]"
 	// DetachHint is shown when a terminal enters a session of the board's own tmux server.
-	DetachHint = "Ctrl-] returns to where you came from"
+	DetachHint = "Ctrl-] returns to where you came from, Ctrl-\\ lists the recent tasks, Ctrl-^ goes to the last one"
 	// MainSessionHint replaces DetachHint when a sub-agent's row was entered: it has no terminal of its own.
 	MainSessionHint = "Sub-agents run inside this main session. " + DetachHint
-	// PrivateConf configures the board's own tmux server: no status bar, no prefix key, one key to leave.
-	// It should feel like plain Claude.
-	PrivateConf = `set -g status off
+	// privateBase is the start of the board's own tmux config: no status bar, no prefix key, one key to
+	// leave. It should feel like plain Claude.
+	privateBase = `set -g status off
 set -g prefix None
 unbind-key -a
 bind-key -n ` + detachKey + ` detach-client
@@ -38,7 +40,45 @@ set -g focus-events on
 set -s escape-time 0
 set -s extended-keys on
 `
+	// switcher opens the switcher of recent tasks in a box over the session. It notes in HC_CLIENT the
+	// terminal the key came from, the one to hand over. /bin/sh runs it whatever your shell, and finds hc
+	// in HC_BIN, so that no path goes through tmux's quoting. A failure stays on screen until a key.
+	switcher = ` set-environment -F HC_CLIENT '#{client_name}' \; display-popup -EE -w 80% -h 60% /bin/sh -c '"${HC_BIN:-hc}" switch --popup'` + "\n"
+	// jump goes straight back to the task you were in before, without the switcher: run-shell runs it
+	// with /bin/sh whatever your shell, and with the session's environment, as the popup does.
+	jump = ` set-environment -F HC_CLIENT '#{client_name}' \; run-shell -b '"${HC_BIN:-hc}" switch --last'` + "\n"
 )
+
+// privateConf configures the board's own tmux server: privateBase, then, when popup says this tmux
+// has popups enough for it, Ctrl-\ to switch to a recent task, and Ctrl-^ to go straight back to the
+// last one, Ctrl-Tab too where the terminal tells it from Tab. bin is the hc the switcher runs; empty, or a path tmux cannot quote, leaves it to
+// the PATH.
+func privateConf(bin string, popup bool) string {
+	conf := privateBase
+	if !popup {
+		return conf
+	}
+	if bin != "" && !strings.ContainsAny(bin, "'\n") {
+		conf += "set-environment -g HC_BIN '" + bin + "'\n"
+	} else {
+		conf += "set-environment -gu HC_BIN\n" // not the one an earlier config left on a running server
+	}
+	return conf + `bind-key -n 'C-\'` + switcher + "bind-key -n 'C-^'" + jump + "bind-key -n C-Tab" + jump
+}
+
+var tmuxVersion = regexp.MustCompile(`(\d+)\.(\d+)`)
+
+// popups tells whether the tmux of tmux -V runs the switcher: 3.2 or later. An older one has no popup,
+// and its key would only add an error to the config. A build that names no version is taken as recent.
+func popups(v string) bool {
+	m := tmuxVersion.FindStringSubmatch(v)
+	if m == nil {
+		return true
+	}
+	major, _ := strconv.Atoi(m[1])
+	minor, _ := strconv.Atoi(m[2])
+	return major > 3 || major == 3 && minor >= 2
+}
 
 // keys are the only keys SendKeys presses: enough to answer a dialog, not enough to type a command.
 var keys = map[string]bool{
@@ -73,6 +113,7 @@ type Window struct {
 	Session string   // the tmux session to open the window in; empty means the most recent one
 	Socket  string   // the socket of the board's own server
 	Conf    string   // the config file of the board's own server
+	Bin     string   // the hc binary the switcher key of the board's own server runs
 }
 
 type paneCache struct {
@@ -387,17 +428,33 @@ func (c *Client) NewWindow(w Window) (string, error) {
 	return pane, err
 }
 
+// Configure writes the config of the board's own server, and has the server read it again when it
+// runs and the config changed: an update brings its keys to the sessions already open. bin is the hc
+// binary the switcher key runs.
+func (c *Client) Configure(socket, conf, bin string) error {
+	if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
+		return err
+	}
+	version, _ := run("", "", "-V")
+	want := privateConf(bin, popups(version))
+	if current, err := os.ReadFile(conf); err == nil && string(current) == want {
+		return nil
+	}
+	if err := os.WriteFile(conf, []byte(want), 0o644); err != nil {
+		return err
+	}
+	if _, err := run(socket, "", "list-sessions"); err == nil {
+		_, _ = run(socket, "", "source-file", conf) // the sessions run on anyway, with the old keys
+	}
+	return nil
+}
+
 // NewSession opens a detached session of its own on the board's private server. It returns the new pane id.
 //
 // One tmux session per task: two terminals can then look at two tasks without following each other.
 func (c *Client) NewSession(w Window) (string, error) {
-	if err := os.MkdirAll(filepath.Dir(w.Conf), 0o755); err != nil {
+	if err := c.Configure(w.Socket, w.Conf, w.Bin); err != nil {
 		return "", err
-	}
-	if current, err := os.ReadFile(w.Conf); err != nil || string(current) != PrivateConf {
-		if err := os.WriteFile(w.Conf, []byte(PrivateConf), 0o644); err != nil {
-			return "", err
-		}
 	}
 	taken := map[string]bool{}
 	if out, err := run(w.Socket, "", "list-sessions", "-F", "#{session_name}"); err == nil {
@@ -416,6 +473,27 @@ func (c *Client) NewSession(w Window) (string, error) {
 	pane, err := run(w.Socket, "", args...)
 	c.forget()
 	return pane, err
+}
+
+// ReplaceClient runs command in place of a client of the tmux server named in TMUX, from a popup of
+// that server: the client's terminal leaves tmux and runs command instead. client is its name, as
+// #{client_name} gives it.
+func ReplaceClient(client, command string) error {
+	_, err := run("", "", "detach-client", "-t", client, "-E", command)
+	return err
+}
+
+// SwitchClient moves a client of the tmux server named in TMUX to the session of pane, with that pane
+// in front: no new client, unlike ReplaceClient.
+func SwitchClient(client, pane string) error {
+	_, err := run("", "", "switch-client", "-c", client, "-t", pane)
+	return err
+}
+
+// Tell shows text for a few seconds at the bottom of a client of the tmux server named in TMUX.
+func Tell(client, text string) error {
+	_, err := run("", "", "display-message", "-c", client, "-d", "3000", strings.ReplaceAll(text, "#", "##"))
+	return err
 }
 
 // AttachCommand is the command that puts a terminal inside a session of the private server, with the

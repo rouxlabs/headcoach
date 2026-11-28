@@ -60,6 +60,7 @@ const (
 	viewReview                // the review queue
 	viewColumns               // the list of the board's columns, to show, hide and move them
 	viewTeam                  // the coordinator view of one task
+	viewSwitch                // the switcher of recent tasks, in a box over the board
 )
 
 // --- messages ------------------------------------------------------------------------
@@ -203,6 +204,8 @@ type model struct {
 
 	detail   viewport.Model
 	detailID string
+
+	sw switcher // the switcher of recent tasks
 
 	pickTask  api.Task
 	pickBatch bool // the picker moves the ticked tasks of select mode, not pickTask
@@ -1202,6 +1205,16 @@ func (m model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.asked++ // the answer on its way is no longer wanted
 		}
 		return m, nil
+
+	case viewSwitch:
+		done, picked := m.sw.key(key)
+		if done {
+			m.view = viewBoard
+		}
+		if picked != nil {
+			return m, m.attach(*picked, false)
+		}
+		return m, nil
 	}
 	if m.asking != "" {
 		return m.typing(msg)
@@ -1497,6 +1510,9 @@ func (m model) boardKey(key string) (tea.Model, tea.Cmd) {
 	case "C":
 		m.view, m.colCursor = viewColumns, 0
 		return m, nil
+	case "tab", "ctrl+\\":
+		m.view, m.sw = viewSwitch, newSwitcher(m.tasks, "")
+		return m, nil
 	case "?":
 		m.note("Keys (any key closes)", help, nil)
 	case "v":
@@ -1666,6 +1682,8 @@ func (m model) View() string {
 		return m.teamView()
 	case viewColumns:
 		return m.columnsView()
+	case viewSwitch:
+		return m.switchView()
 	}
 
 	height := m.tableHeight()
@@ -1785,9 +1803,10 @@ func Run(c *client.Client, theme, workdir string, profiles []string, columnsPath
 		return err
 	}
 	// Ctrl-C belongs to the session while the terminal is handed over, not to the board: the signal
-	// is caught and dropped here. Caught, not ignored, so that the session itself still gets it.
+	// is caught and dropped here. Caught, not ignored, so that the session itself still gets it. So is
+	// Ctrl-\, the switcher's key, pressed again while a switch hands the terminal from one task to another.
 	interrupts := make(chan os.Signal, 1)
-	signal.Notify(interrupts, syscall.SIGINT)
+	signal.Notify(interrupts, syscall.SIGINT, syscall.SIGQUIT)
 	defer signal.Stop(interrupts)
 	go func() {
 		for range interrupts {

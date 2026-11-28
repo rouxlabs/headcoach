@@ -152,7 +152,7 @@ func (c *Client) Pin(id string, pin bool) (api.Task, error) {
 }
 
 // Enter returns the command that takes this terminal into a task's session in the board's tmux,
-// starting the session if needed.
+// starting the session if needed. It notes the task as seen, for the switcher of recent tasks.
 //
 // It is empty when the session lives somewhere else: in your own tmux, or nowhere yet with
 // private_tmux off.
@@ -168,5 +168,6 @@ func (c *Client) Enter(t api.Task) ([]string, error) {
 			}
 		}
 	}
+	_, _ = c.Do("PATCH", "/api/tasks/"+t.ID, map[string]bool{"seen": true}) // not worth keeping you out for
 	return t.Attach, nil
 }

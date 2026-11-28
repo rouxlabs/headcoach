@@ -187,6 +187,14 @@ func TestAttachStreamsTheTerminalBothWays(t *testing.T) {
 	}
 }
 
+func TestAttachSeesTheTask(t *testing.T) {
+	a := attach(t, "")
+	a.mustSee("24 80")
+	if a.f.task(a.id).SeenAt == 0 {
+		t.Error("a task entered from a phone is not seen")
+	}
+}
+
 func TestAttachStartsAt80x24WithoutASize(t *testing.T) {
 	a := attach(t, "?cols=0&rows=nope")
 	a.mustSee("24 80")

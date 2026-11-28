@@ -34,7 +34,15 @@ func cmdServe(e *env, p parsed) error {
 	}
 	defer st.Close()
 
-	daemon := server.New(cfg, st, &tmux.Client{})
+	tm := &tmux.Client{}
+	if cfg.PrivateTmux {
+		// Sessions already open get the keys of this version, such as the switcher of recent tasks.
+		exe, _ := os.Executable()
+		if err := tm.Configure(cfg.TmuxSocket(), cfg.TmuxConf(), exe); err != nil {
+			log.Printf("the board's tmux keeps its config: %v", err)
+		}
+	}
+	daemon := server.New(cfg, st, tm)
 	handler := daemon.Handler()
 	loopsDone := make(chan struct{})
 	defer close(loopsDone)

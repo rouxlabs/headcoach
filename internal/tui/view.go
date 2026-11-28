@@ -47,6 +47,9 @@ const (
 g / G           go to the top or the bottom; pgup / pgdn move a page
 a               attach: enter the session in this terminal, Ctrl-] comes back; a sub-agent enters
                 its main session
+tab             recent tasks: the last 10 you entered, the latest first; tab moves, enter, a or the
+                number enters one; inside a session of the board's tmux, Ctrl-\ opens them too, and
+                Ctrl-^ goes straight back to the last one
 enter           open the task: metadata, history, session log
 r               reply to the session; on a question, answer it in its "Type something" option
 q               question: ask about the session without touching it; enter alone gives a summary

@@ -211,9 +211,12 @@ func (s *Server) attachCommand(r *http.Request) ([]string, bool, error) {
 	case !view.Live:
 		return nil, false, fail(409, "The session is not running: start it first")
 	case view.Tmux == "herdr":
-		return view.Attach, true, nil
+		return view.Attach, true, s.st.SeeTask(task.ID)
 	case len(view.Attach) == 0:
 		return nil, false, fail(409, "The session runs in your own tmux: enter it from the computer")
+	}
+	if err := s.st.SeeTask(task.ID); err != nil {
+		return nil, false, err
 	}
 	// Without the Ctrl-] hint a terminal gets: the client has its own way out, a key of the app.
 	return tmux.AttachQuiet(view.Pane, s.cfg.TmuxSocket()), false, nil
