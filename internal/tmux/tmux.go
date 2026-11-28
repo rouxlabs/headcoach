@@ -28,12 +28,14 @@ const (
 	// MainSessionHint replaces DetachHint when a sub-agent's row was entered: it has no terminal of its own.
 	MainSessionHint = "Sub-agents run inside this main session. " + DetachHint
 	// privateBase is the start of the board's own tmux config: no status bar, no prefix key, one key to
-	// leave. It should feel like plain Claude.
+	// leave, and a mouse wheel that scrolls from its first click, where tmux's own only enters copy mode
+	// with it. It should feel like plain Claude.
 	privateBase = `set -g status off
 set -g prefix None
 unbind-key -a
 bind-key -n ` + detachKey + ` detach-client
 set -g mouse on
+bind-key -n WheelUpPane if-shell -F '#{||:#{alternate_on},#{pane_in_mode},#{mouse_any_flag}}' { send-keys -M } { copy-mode -e; send-keys -X -N 5 scroll-up }
 set -g history-limit 50000
 set -g default-size 200x50
 set -g focus-events on

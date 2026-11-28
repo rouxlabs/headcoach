@@ -368,3 +368,46 @@ func TestReplaceClientHandsOverTheClientNamed(t *testing.T) {
 		t.Errorf("clients left: %v, want two's %s", left, attached["two"])
 	}
 }
+
+func TestTheFirstWheelClickScrolls(t *testing.T) {
+	socket := privateSocket(t)
+	c := &Client{}
+	pane, err := c.NewSession(Window{Name: "t", Command: "seq 1 200; sleep 30", Socket: socket,
+		Conf: filepath.Join(filepath.Dir(socket), "tmux.conf")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A terminal attached as a person's would be: tmux reads the wheel from it.
+	attach := exec.Command("tmux", "-S", socket, "attach")
+	attach.Env = append(cleanEnv(os.Environ()), "TERM=xterm-256color")
+	term, err := pty.StartWithSize(attach, &pty.Winsize{Cols: 80, Rows: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = attach.Process.Kill()
+		_ = attach.Wait()
+		term.Close()
+	})
+	go func() { _, _ = io.Copy(io.Discard, term) }()
+	wait := func(format, want string) {
+		t.Helper()
+		got := ""
+		for i := 0; i < 100; i++ {
+			got, _ = run(socket, "", "display-message", "-p", "-t", pane, format)
+			if strings.TrimSpace(got) == want {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("%s is %q, want %q", format, strings.TrimSpace(got), want)
+	}
+	wait("#{session_attached}", "1")
+	// 200 lines and the cursor's on 24 rows: the attach resized the window.
+	wait("#{history_size}", "177")
+	// The wheel up, in SGR mouse mode.
+	if _, err := term.Write([]byte("\x1b[<64;10;10M")); err != nil {
+		t.Fatal(err)
+	}
+	wait("#{pane_in_mode} #{scroll_position}", "1 5")
+}
